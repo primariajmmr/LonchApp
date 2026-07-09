@@ -1,0 +1,2458 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tienda Escolar V4.1 (Nube)</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        .fade-in { animation: fadeIn 0.3s ease-in-out; }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans selection:bg-blue-100 min-h-screen">
+
+    <!-- Loading Screen -->
+    <div id="loading-screen" class="min-h-screen flex items-center justify-center p-4 z-50 fixed inset-0 bg-slate-50">
+        <div class="animate-pulse flex flex-col items-center" id="loading-content">
+            <div class="w-12 h-12 rounded-full border-4 border-blue-500 border-t-transparent animate-spin mb-4"></div>
+            <p class="text-slate-500 font-medium text-lg">Conectando a la base de datos en la nube...</p>
+        </div>
+    </div>
+
+    <!-- Main Application UI -->
+    <div id="app-container" class="hidden relative">
+        <!-- Header -->
+        <header class="bg-white shadow-sm sticky top-0 z-10">
+            <div class="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <button id="btn-back" onclick="window.app.setView('home')" class="hidden p-2 -ml-2 hover:bg-slate-100 rounded-full transition-colors text-slate-600">
+                        <i data-lucide="chevron-left" class="w-6 h-6"></i>
+                    </button>
+                    <div class="flex items-center gap-2">
+                        <div class="bg-blue-600 text-white p-1.5 rounded-lg">
+                            <i data-lucide="utensils-crossed" class="w-5 h-5"></i>
+                        </div>
+                        <h1 class="font-bold text-xl tracking-tight text-slate-900">
+                            Tienda Escolar <span class="text-blue-600 font-black">v4.1</span>
+                        </h1>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content Area -->
+        <main id="main-content" class="max-w-5xl mx-auto p-4 sm:p-6 lg:p-8">
+            <!-- Views will be injected here via JavaScript -->
+        </main>
+        
+        <!-- Modal Container -->
+        <div id="modal-container"></div>
+    </div>
+
+    <!-- Logic Script (Type Module for Firebase) -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Configuración de Firebase del usuario
+        const firebaseConfig = {
+            apiKey: "AIzaSyDbmTr8iOj03H4ieNKXASLpQNAKiAEcupM",
+            authDomain: "tienda-escolar-jmmr.firebaseapp.com",
+            projectId: "tienda-escolar-jmmr",
+            storageBucket: "tienda-escolar-jmmr.firebasestorage.app",
+            messagingSenderId: "771853362864",
+            appId: "1:771853362864:web:58d1fbb7c67bce71dabd75"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        // Path estructurado para guardar toda la aplicación
+        const docRef = doc(db, 'artifacts', 'tienda-escolar-jmmr', 'public', 'data', 'tienda_data', 'main');
+
+        // --- CONSTANTES ---
+        const ALIMENTOS_BASE = ['Torta de Jamón', 'Sándwich de Pollo', 'Molletes con Queso', 'Quesadillas', 'Chilaquiles Suaves', 'Hot Cakes', 'Fruta Picada', 'Yogurt con Cereal', 'Gelatina'];
+        const BEBIDAS_BASE = ['Jugo de Naranja', 'Jugo de Manzana', 'Leche con Chocolate', 'Licuado de Fresa', 'Avena'];
+        const DIAS_SEMANA = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes'];
+        const GRADOS = ['1A', '1B', '2A', '2B', '3A', '3B', '4A', '5A', '6A'];
+        
+        const MENU_POR_DEFECTO = {
+            Lunes: ['Torta de Jamón', 'Jugo de Naranja', 'Fruta Picada'],
+            Martes: ['Molletes con Queso', 'Leche con Chocolate', 'Gelatina'],
+            Miércoles: ['Sándwich de Pollo', 'Licuado de Fresa', 'Avena'],
+            Jueves: ['Quesadillas', 'Jugo de Manzana', 'Yogurt con Cereal'],
+            Viernes: ['Chilaquiles Suaves', 'Jugo de Naranja', 'Hot Cakes']
+        };
+
+        // --- ESTADO GLOBAL ---
+        const state = {
+            view: 'home', 
+            schoolTab: 'pedidos', 
+            menuConfigDay: 'Lunes',
+            kitchenDay: 'Lunes', 
+            kitchenTab: 'pendientes',
+            kitchenGradeFilter: 'Todos', 
+            kitchenSelectedDelivered: [], 
+            
+            cycles: [],
+            activeCycleId: null, 
+            managingCycleId: null,
+            managingWeekId: null, 
+            reportCycleId: null,
+            reportWeekId: null, 
+            
+            draftMenu: null,
+            draftInactiveDays: [], 
+            adminData: {
+                grades: [], students: {}, alimentos: [], bebidas: [],   
+                passwords: {}, contactInfo: { name: '', phone: '' },
+                settings: { homeOrderSchedule: { mode: 'always', days: [1,2,3,4,5], start: '07:00', end: '16:00' } }
+            },
+            adminSelectedGrade: '',
+            adminStudentAddMode: 'masivo', 
+            editingStudent: null, 
+            loggedStudent: null,  
+            
+            formSelection: { day: null, grade: '', payment: 'Pagado' },
+            
+            adminSelectedStudents: [],
+            adminSelectedAlimentos: [],
+            adminSelectedBebidas: [],
+            adminStudentSearch: '',
+            adminAlimentoSearch: '',
+            adminBebidaSearch: '',
+            
+            adminOrderDay: 'Lunes',
+            adminOrderGrade: 'Todos',
+
+            dbConnected: false // Estado de conexión de Firebase
+        };
+
+        let cloudData = null; // Mantiene la última copia de la base de datos
+
+        // --- HELPERS ---
+        const getActiveCycle = () => state.cycles.find(c => c.id === state.activeCycleId) || state.cycles[0];
+        const getManagingCycle = () => state.cycles.find(c => c.id === state.managingCycleId) || getActiveCycle();
+        const getActiveWeek = () => { const c = getActiveCycle(); return c ? (c.weeks.find(w => w.id === c.activeWeekId) || c.weeks[0]) : null; };
+        const getManagingWeek = () => { const c = getManagingCycle(); return c ? (c.weeks.find(w => w.id === state.managingWeekId) || c.weeks[0]) : null; };
+
+        // --- FIREBASE DATA LAYER ---
+        function getFullLocalData() {
+            // Retorna una copia profunda del último estado de la nube
+            return cloudData ? JSON.parse(JSON.stringify(cloudData)) : null;
+        }
+
+        async function saveFullLocalData(data) {
+            cloudData = JSON.parse(JSON.stringify(data)); // Optimistic UI Update
+            try {
+                await setDoc(docRef, data);
+            } catch (e) {
+                console.error("Error al guardar en Firebase:", e);
+                alert("Error de permisos guardando en la nube. Revisa la consola.");
+            }
+        }
+
+        function hydrateState(data) {
+            state.cycles = data.cycles || [];
+            state.activeCycleId = data.activeCycleId;
+            state.adminData = data.adminData;
+            
+            const currentActiveCycle = state.cycles.find(c => c.id === state.activeCycleId) || state.cycles[0];
+            state.activeWeekId = currentActiveCycle ? currentActiveCycle.activeWeekId : null;
+            
+            if (!state.adminData.alimentos) state.adminData.alimentos = [...ALIMENTOS_BASE];
+            if (!state.adminData.bebidas) state.adminData.bebidas = [...BEBIDAS_BASE];
+            if (!state.adminData.passwords) state.adminData.passwords = { admin: 'admin', cocina: '', escuela: '' };
+            if (!state.adminData.contactInfo) state.adminData.contactInfo = { name: '', phone: '' };
+            if (!state.adminData.settings) state.adminData.settings = { homeOrderSchedule: { mode: 'always', days: [1,2,3,4,5], start: '07:00', end: '16:00' } };
+
+            if (!state.activeCycleId || !state.cycles.find(c => c.id === state.activeCycleId)) {
+                state.activeCycleId = state.cycles.length > 0 ? state.cycles[0].id : null;
+            }
+            if (!state.managingCycleId || !state.cycles.find(c => c.id === state.managingCycleId)) {
+                state.managingCycleId = state.activeCycleId;
+            }
+            if (!state.reportCycleId || !state.cycles.find(c => c.id === state.reportCycleId)) {
+                state.reportCycleId = state.activeCycleId;
+            }
+            
+            const managingCycle = getManagingCycle();
+            if (managingCycle && (!state.managingWeekId || !managingCycle.weeks.find(w => w.id === state.managingWeekId))) {
+                state.managingWeekId = managingCycle.activeWeekId || (managingCycle.weeks.length > 0 ? managingCycle.weeks[0].id : null);
+            }
+            
+            const reportCycle = state.cycles.find(c => c.id === state.reportCycleId) || getActiveCycle();
+            if (reportCycle && (!state.reportWeekId || !reportCycle.weeks.find(w => w.id === state.reportWeekId))) {
+                state.reportWeekId = reportCycle.activeWeekId || (reportCycle.weeks.length > 0 ? reportCycle.weeks[0].id : null);
+            }
+
+            const managingWeek = getManagingWeek();
+            if (managingWeek) {
+                state.draftMenu = JSON.parse(JSON.stringify(managingWeek.menu || MENU_POR_DEFECTO));
+                state.draftInactiveDays = [...(managingWeek.inactiveDays || [])]; 
+            } else {
+                state.draftMenu = JSON.parse(JSON.stringify(MENU_POR_DEFECTO));
+                state.draftInactiveDays = [];
+            }
+
+            // Ocultar pantalla de carga
+            document.getElementById('loading-screen').classList.add('hidden');
+            document.getElementById('app-container').classList.remove('hidden');
+            renderView();
+        }
+
+        async function initializeEmptyDB() {
+            const newWeek = { id: 'week_' + Date.now(), range: 'Primera Semana', menu: MENU_POR_DEFECTO, orders: [], inactiveDays: [], status: 'active' };
+            const newCycle = { id: 'cycle_' + Date.now(), name: 'Ciclo 2025-2026', weeks: [newWeek], activeWeekId: newWeek.id };
+            
+            const newData = {
+                cycles: [newCycle],
+                activeCycleId: newCycle.id,
+                adminData: {
+                    grades: [...GRADOS],
+                    students: {},
+                    alimentos: [...ALIMENTOS_BASE],
+                    bebidas: [...BEBIDAS_BASE],
+                    passwords: { admin: 'admin', cocina: '', escuela: '' },
+                    contactInfo: { name: '', phone: '' },
+                    settings: { homeOrderSchedule: { mode: 'always', days: [1,2,3,4,5], start: '07:00', end: '16:00' } }
+                }
+            };
+            
+            for(let g of GRADOS) {
+                newData.adminData.students[g] = [];
+            }
+
+            await saveFullLocalData(newData);
+        }
+
+        // --- INICIALIZACIÓN DE FIREBASE ---
+        async function initFirebase() {
+            const defaultDayIndex = new Date().getDay() - 1;
+            const currentDayString = DIAS_SEMANA[defaultDayIndex >= 0 && defaultDayIndex < 5 ? defaultDayIndex : 0];
+            state.formSelection.day = currentDayString;
+            state.kitchenDay = currentDayString; 
+
+            try {
+                await signInAnonymously(auth);
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        onSnapshot(docRef, (docSnap) => {
+                            state.dbConnected = true;
+                            if (docSnap.exists()) {
+                                cloudData = docSnap.data();
+                                hydrateState(cloudData);
+                            } else {
+                                initializeEmptyDB();
+                            }
+                        }, (error) => {
+                            state.dbConnected = false;
+                            console.error("Error al escuchar Firebase:", error);
+                            document.getElementById('loading-content').innerHTML = `
+                                <div class="bg-white p-8 rounded-3xl shadow-xl max-w-md text-center border border-red-100 fade-in">
+                                    <div class="bg-red-100 text-red-600 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+                                        <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                                    </div>
+                                    <h2 class="text-xl font-bold text-slate-900 mb-2">Error de Permisos (Firestore)</h2>
+                                    <p class="text-slate-600 text-sm mb-4">No se pudo acceder a la base de datos. Las reglas de seguridad de Firestore están bloqueando el acceso.</p>
+                                    <div class="text-left bg-slate-50 p-4 rounded-xl text-sm text-slate-700">
+                                        <p class="font-bold mb-1 text-slate-800">Para solucionarlo:</p>
+                                        <ol class="list-decimal pl-5 space-y-2 text-slate-600">
+                                            <li>Ve a tu consola de Firebase > <b>Firestore Database</b>.</li>
+                                            <li>Entra a la pestaña <b>Reglas (Rules)</b>.</li>
+                                            <li>Cambia el código a: <br><code class="bg-slate-200 px-2 py-1 rounded text-xs mt-1 block font-mono">match /{document=**} {<br>&nbsp;&nbsp;allow read, write: if true;<br>}</code></li>
+                                            <li>Haz clic en <b>Publicar</b> y recarga esta página.</li>
+                                        </ol>
+                                    </div>
+                                </div>
+                            `;
+                        });
+                    }
+                });
+            } catch (e) {
+                console.error("Error Auth:", e);
+                document.getElementById('loading-content').innerHTML = `
+                    <div class="bg-white p-8 rounded-3xl shadow-xl max-w-md text-center border border-red-100 fade-in">
+                        <div class="bg-red-100 text-red-600 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+                            <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path></svg>
+                        </div>
+                        <h2 class="text-xl font-bold text-slate-900 mb-2">Configuración Incompleta en Firebase</h2>
+                        <p class="text-slate-600 text-sm mb-4">El error <b>${e.code || 'Auth Error'}</b> significa que Firebase Authentication no está habilitado.</p>
+                        <div class="text-left bg-slate-50 p-4 rounded-xl text-sm text-slate-700">
+                            <p class="font-bold mb-2 text-slate-800">Para solucionarlo:</p>
+                            <ol class="list-decimal pl-5 space-y-2 text-slate-600">
+                                <li>Ve a tu consola de Firebase.</li>
+                                <li>Entra a la sección <b>Authentication</b>.</li>
+                                <li>Haz clic en el botón <b>Comenzar (Get Started)</b>.</li>
+                                <li>Ve a la pestaña <b>Sign-in method</b>.</li>
+                                <li>Habilita el proveedor <b>Anónimo (Anonymous)</b> y guarda.</li>
+                                <li>Recarga esta página.</li>
+                            </ol>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        // --- RENDERIZADO PRINCIPAL ---
+        function renderView() {
+            const container = document.getElementById('main-content');
+            const btnBack = document.getElementById('btn-back');
+            const modalContainer = document.getElementById('modal-container');
+            
+            if (state.view === 'home') {
+                btnBack.classList.add('hidden');
+                container.innerHTML = renderHomeView();
+            } else {
+                btnBack.classList.remove('hidden');
+                if (state.view === 'cocina') container.innerHTML = renderKitchenView();
+                if (state.view === 'escuela') container.innerHTML = renderSchoolView();
+                if (state.view === 'casa') container.innerHTML = renderParentView();
+                if (state.view === 'admin') container.innerHTML = renderAdminView();
+            }
+            
+            modalContainer.innerHTML = state.editingStudent ? renderEditStudentModal() : '';
+            if ((state.view === 'escuela' && state.schoolTab === 'pedidos') || (state.view === 'casa' && state.loggedStudent)) {
+                setTimeout(() => window.app.updateOrderFormUI(state.view === 'escuela' ? 'Escuela' : 'Casa'), 0);
+            }
+            if(window.lucide) lucide.createIcons();
+        }
+
+        // --- VISTAS ---
+        function renderHomeView() {
+            const activeWeek = getActiveWeek();
+            const pendingCount = activeWeek ? activeWeek.orders.filter(o => o.status === 'pendiente').length : 0;
+            const badgeHtml = pendingCount > 0 ? `<span class="absolute top-4 right-4 bg-red-500 text-white text-xs font-bold px-3 py-1 rounded-full animate-pulse">${pendingCount} Pendientes</span>` : '';
+
+            // Estado de conexión discreto para Firebase
+            const dbStatusHtml = state.dbConnected 
+                ? '<span class="text-emerald-500 flex justify-center items-center gap-1"><i data-lucide="cloud-check" class="w-3 h-3"></i> Conectado a Firebase</span>'
+                : '<span class="text-amber-500 flex justify-center items-center gap-1"><i data-lucide="cloud-off" class="w-3 h-3 animate-pulse"></i> Conectando...</span>';
+
+            return `
+                <div class="max-w-3xl mx-auto fade-in">
+                    <div class="text-center mb-10 mt-4">
+                        <h2 class="text-3xl font-bold text-slate-900 mb-3">Selecciona tu perfil</h2>
+                        <p class="text-slate-500">Accede a la sección correspondiente para gestionar los pedidos.</p>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        <button onclick="window.app.requestAccess('cocina')" class="group relative bg-white p-8 rounded-3xl shadow-sm border border-slate-100 hover:shadow-xl hover:border-emerald-200 transition-all text-left flex flex-col h-full focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2">
+                            ${badgeHtml}
+                            <div class="bg-emerald-100 text-emerald-600 w-16 h-16 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform"><i data-lucide="chef-hat" class="w-8 h-8"></i></div>
+                            <h3 class="text-2xl font-bold group-hover:text-emerald-600 transition-colors">Cocina</h3>
+                        </button>
+                        <button onclick="window.app.requestAccess('escuela')" class="group bg-white p-8 rounded-3xl shadow-sm border border-slate-100 hover:shadow-xl hover:border-blue-200 transition-all text-left flex flex-col h-full focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
+                            <div class="bg-blue-100 text-blue-600 w-16 h-16 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform"><i data-lucide="school" class="w-8 h-8"></i></div>
+                            <h3 class="text-2xl font-bold group-hover:text-blue-600 transition-colors">Escuela</h3>
+                        </button>
+                        <button onclick="window.app.requestAccess('casa')" class="group bg-white p-8 rounded-3xl shadow-sm border border-slate-100 hover:shadow-xl hover:border-amber-200 transition-all text-left flex flex-col h-full focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2">
+                            <div class="bg-amber-100 text-amber-600 w-16 h-16 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform"><i data-lucide="home" class="w-8 h-8"></i></div>
+                            <h3 class="text-2xl font-bold group-hover:text-amber-600 transition-colors">Casa</h3>
+                        </button>
+                    </div>
+                    <div class="mt-16 flex flex-col items-center">
+                        <button onclick="window.app.requestAccess('admin')" class="inline-flex items-center gap-2 text-slate-400 hover:text-slate-700 transition-colors text-sm font-medium focus:outline-none">
+                            <i data-lucide="settings" class="w-4 h-4"></i> Administración del Sistema
+                        </button>
+                        <div class="mt-2 text-[10px] font-semibold tracking-wide">
+                            ${dbStatusHtml}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderKitchenView() {
+            const activeCycle = getActiveCycle();
+            const activeWeek = getActiveWeek();
+            if (!activeCycle || !activeWeek) return `<div class="p-8 text-center text-red-500 font-bold">Error: No hay un Ciclo o Semana activa configurada.</div>`;
+
+            const filteredByDay = activeWeek.orders.filter(o => o.dayFor === state.kitchenDay);
+            const filteredByGrade = state.kitchenGradeFilter === 'Todos' ? filteredByDay : filteredByDay.filter(o => o.grade === state.kitchenGradeFilter);
+            const pendOrders = filteredByGrade.filter(o => o.status === 'pendiente');
+            const entOrders = filteredByGrade.filter(o => o.status === 'entregado');
+            const displayedOrders = state.kitchenTab === 'pendientes' ? pendOrders : entOrders;
+
+            let daysHtml = '';
+            DIAS_SEMANA.forEach(d => {
+                const isActive = d === state.kitchenDay;
+                const btnClass = isActive ? 'bg-emerald-600 text-white shadow-md' : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200';
+                daysHtml += `<button onclick="window.app.setKitchenDay('${d}')" class="px-4 py-2 rounded-lg text-sm font-bold transition-colors ${btnClass}">${d}</button>`;
+            });
+
+            let gradesFilterHtml = `<button onclick="window.app.setKitchenGradeFilter('Todos')" class="px-4 py-2 rounded-lg text-sm font-bold transition-colors ${state.kitchenGradeFilter === 'Todos' ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200'}">Todos</button>`;
+            state.adminData.grades.forEach(g => {
+                const isActive = g === state.kitchenGradeFilter;
+                const btnClass = isActive ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200';
+                gradesFilterHtml += `<button onclick="window.app.setKitchenGradeFilter('${g}')" class="px-4 py-2 rounded-lg text-sm font-bold transition-colors ${btnClass}">${g}</button>`;
+            });
+
+            const summaryCounts = {};
+            filteredByGrade.forEach(o => {
+                const items = o.breakfastType.split(' + ');
+                items.forEach(item => { summaryCounts[item] = (summaryCounts[item] || 0) + 1; });
+            });
+            let summaryTotalsHtml = '';
+            if (Object.keys(summaryCounts).length > 0) {
+                summaryTotalsHtml = `<div class="flex flex-wrap gap-2 bg-emerald-50 p-4 rounded-xl border border-emerald-200 shadow-sm">
+                    <span class="font-bold text-emerald-900 w-full mb-1 flex items-center gap-2"><i data-lucide="list-ordered" class="w-4 h-4"></i> TOTAL DE PEDIDOS (${state.kitchenGradeFilter}):</span>`;
+                for (const [food, count] of Object.entries(summaryCounts)) {
+                    summaryTotalsHtml += `<span class="bg-white px-3 py-1 rounded-md text-sm font-bold text-emerald-800 shadow-sm border border-emerald-100">${food}: <span class="text-emerald-600 text-lg ml-1">${count}</span></span>`;
+                }
+                summaryTotalsHtml += `</div>`;
+            }
+
+            let bulkActionsHtml = '';
+            if (state.kitchenTab === 'entregados' && entOrders.length > 0) {
+                const allSelected = state.kitchenSelectedDelivered.length > 0 && state.kitchenSelectedDelivered.length === entOrders.length;
+                bulkActionsHtml = `
+                    <div class="bg-amber-50 border border-amber-200 p-3 rounded-xl flex items-center justify-between shadow-sm w-full">
+                        <label class="flex items-center gap-2 cursor-pointer font-bold text-amber-900 text-sm">
+                            <input type="checkbox" onchange="window.app.toggleAllKitchenDelivered(this.checked)" ${allSelected ? 'checked' : ''} class="w-5 h-5 text-amber-600 rounded border-amber-300 focus:ring-amber-500">
+                            Seleccionar Todos
+                        </label>
+                        ${state.kitchenSelectedDelivered.length > 0 ? `
+                            <button onclick="window.app.deleteSelectedKitchenDelivered()" class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition-colors shadow-sm">
+                                <i data-lucide="trash-2" class="w-4 h-4"></i> Eliminar (${state.kitchenSelectedDelivered.length})
+                            </button>
+                        ` : ''}
+                    </div>
+                `;
+            }
+
+            let content = '';
+            if (displayedOrders.length === 0) {
+                const isPending = state.kitchenTab === 'pendientes';
+                content = `
+                    <div class="bg-white rounded-3xl p-12 text-center border border-slate-100 shadow-sm col-span-full">
+                        <div class="bg-emerald-50 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-4"><i data-lucide="${isPending ? 'check-circle-2' : 'inbox'}" class="w-10 h-10 text-emerald-400"></i></div>
+                        <h3 class="text-xl font-bold text-slate-700 mb-2">${isPending ? '¡Todo al día!' : 'Sin entregas'}</h3>
+                        <p class="text-slate-500">${isPending ? 'No hay pedidos con estos filtros.' : 'Aún no has entregado pedidos con estos filtros.'}</p>
+                    </div>
+                `;
+            } else {
+                content = `<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 w-full">`;
+                displayedOrders.forEach(order => {
+                    const time = new Date(order.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                    
+                    let actionBtnHtml = '';
+                    if (state.kitchenTab === 'pendientes') {
+                        actionBtnHtml = `<button onclick="window.app.completeOrder('${order.id}')" class="w-full bg-emerald-500 hover:bg-emerald-600 text-white py-3 rounded-xl font-semibold transition-colors flex items-center justify-center gap-2 mt-2"><i data-lucide="check" class="w-5 h-5"></i> Marcar Listo y Entregado</button>`;
+                    } else {
+                        actionBtnHtml = `
+                            <div class="flex gap-2 mt-2">
+                                <button onclick="window.app.undoOrder('${order.id}')" class="flex-grow bg-amber-500 hover:bg-amber-600 text-white py-3 rounded-xl font-semibold transition-colors flex items-center justify-center gap-2 shadow-sm">
+                                    <i data-lucide="rotate-ccw" class="w-5 h-5"></i> Quitar
+                                </button>
+                                <button onclick="window.app.deleteOrderPermanently('${order.id}')" class="bg-red-500 hover:bg-red-600 text-white px-5 rounded-xl font-semibold transition-colors flex items-center justify-center shadow-sm" title="Eliminar Definitivamente">
+                                    <i data-lucide="trash-2" class="w-5 h-5"></i>
+                                </button>
+                            </div>
+                        `;
+                    }
+
+                    let checkboxHtml = '';
+                    if (state.kitchenTab === 'entregados') {
+                        const isSelected = state.kitchenSelectedDelivered.includes(order.id);
+                        checkboxHtml = `<input type="checkbox" onchange="window.app.toggleKitchenDelivered('${order.id}')" ${isSelected ? 'checked' : ''} class="w-5 h-5 text-amber-600 rounded cursor-pointer border-slate-300 focus:ring-amber-500 mt-0.5">`;
+                    }
+
+                    content += `
+                        <div class="bg-white p-5 rounded-2xl shadow-sm border ${state.kitchenTab === 'entregados' ? (state.kitchenSelectedDelivered.includes(order.id) ? 'border-amber-400 bg-amber-50/50' : 'border-emerald-100 bg-emerald-50/30') : 'border-slate-100'} flex flex-col transition-colors">
+                            <div class="flex justify-between items-start mb-4 gap-2">
+                                <div class="flex items-start gap-2 flex-wrap">
+                                    ${checkboxHtml}
+                                    <span class="bg-blue-50 text-blue-700 text-xs font-bold px-2 py-1 rounded-md uppercase tracking-wide">${order.source}</span>
+                                    ${window.app.getPaymentBadge(order.paymentStatus)}
+                                </div>
+                                <span class="text-xs text-slate-400 flex items-center gap-1 flex-shrink-0 mt-1"><i data-lucide="clock" class="w-3 h-3"></i> ${time}</span>
+                            </div>
+                            <div class="mb-4 flex-grow">
+                                <h4 class="font-bold text-lg text-slate-900 mb-1">${order.breakfastType}</h4>
+                                <div class="flex items-center gap-2 text-sm text-slate-600 mb-1"><i data-lucide="graduation-cap" class="w-4 h-4 text-slate-400"></i><span>Grado: <strong>${order.grade}</strong></span></div>
+                                <div class="flex items-center gap-2 text-sm text-slate-600"><i data-lucide="user" class="w-4 h-4 text-slate-400"></i><span>Alumno: <strong>${order.studentName}</strong></span></div>
+                            </div>
+                            ${actionBtnHtml}
+                        </div>
+                    `;
+                });
+                content += `</div>`;
+            }
+
+            return `
+                <div class="fade-in">
+                    <div class="flex flex-col mb-8 gap-5">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <h2 class="text-2xl font-bold text-slate-900 flex items-center gap-2"><i data-lucide="chef-hat" class="w-6 h-6 text-emerald-500"></i> Monitor de Cocina</h2>
+                                <p class="text-slate-500">${activeCycle.name} - <span class="font-semibold text-emerald-600">${activeWeek.range}</span></p>
+                            </div>
+                        </div>
+                        <div class="flex flex-col gap-4 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+                            <div class="flex flex-wrap gap-2 items-center"><span class="text-sm font-semibold text-slate-400 mx-2 hidden sm:block">Día:</span>${daysHtml}</div>
+                            <div class="flex flex-wrap gap-2 items-center border-t border-slate-100 pt-3"><span class="text-sm font-semibold text-slate-400 mx-2 hidden sm:block">Grupo:</span>${gradesFilterHtml}</div>
+                        </div>
+                        ${summaryTotalsHtml}
+                        <div class="flex bg-slate-100 p-1 rounded-xl w-full sm:w-fit self-start mt-2">
+                            <button onclick="window.app.setKitchenTab('pendientes')" class="${state.kitchenTab === 'pendientes' ? 'bg-white shadow text-emerald-700' : 'text-slate-500 hover:text-slate-700'} flex-1 lg:flex-none px-6 py-2.5 rounded-lg text-sm font-bold transition-all flex justify-center items-center gap-2">Pendientes (${pendOrders.length})</button>
+                            <button onclick="window.app.setKitchenTab('entregados')" class="${state.kitchenTab === 'entregados' ? 'bg-white shadow text-emerald-700' : 'text-slate-500 hover:text-slate-700'} flex-1 lg:flex-none px-6 py-2.5 rounded-lg text-sm font-bold transition-all flex justify-center items-center gap-2">Entregados (${entOrders.length})</button>
+                        </div>
+                        ${bulkActionsHtml}
+                    </div>
+                    ${content}
+                </div>
+            `;
+        }
+
+        function renderSchoolView() {
+            const isPedidos = state.schoolTab === 'pedidos';
+            const isMenu = state.schoolTab === 'menu';
+            const managingCycle = getManagingCycle();
+            const managingWeek = getManagingWeek();
+            
+            let contentHtml = '';
+            if (isPedidos) contentHtml = renderOrderForm('Escuela', managingWeek);
+            else if (isMenu) contentHtml = renderMenuConfigurator();
+
+            let cycleOptionsHtml = '';
+            state.cycles.forEach(c => {
+                let statusLabel = c.id === state.activeCycleId ? ' (Activo)' : '';
+                cycleOptionsHtml += `<option value="${c.id}" ${c.id === state.managingCycleId ? 'selected' : ''}>${c.name}${statusLabel}</option>`;
+            });
+
+            let weekOptionsHtml = '';
+            if (managingCycle && managingCycle.weeks.length > 0) {
+                managingCycle.weeks.forEach(w => {
+                    let statusLabel = w.status === 'active' ? ' (Activa)' : w.status === 'archived' ? ' (Archivada)' : ' (Planeada)';
+                    weekOptionsHtml += `<option value="${w.id}" ${w.id === state.managingWeekId ? 'selected' : ''}>${w.range}${statusLabel}</option>`;
+                });
+            } else {
+                weekOptionsHtml = `<option value="">Sin semanas creadas</option>`;
+            }
+
+            let activeBannerHtml = '';
+            if (managingCycle && (managingCycle.id !== state.activeCycleId || (managingWeek && managingWeek.id !== managingCycle.activeWeekId))) {
+                const targetText = managingCycle.id !== state.activeCycleId ? 'un ciclo escolar inactivo' : 'una semana inactiva';
+                const fnCall = managingCycle.id !== state.activeCycleId ? `window.app.makeCycleActive('${managingCycle.id}')` : `window.app.makeWeekActive('${managingWeek.id}')`;
+                
+                activeBannerHtml = `
+                    <div class="bg-indigo-50 border border-indigo-200 rounded-2xl p-4 mb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 animate-in fade-in">
+                        <div>
+                            <h4 class="text-indigo-900 font-bold flex items-center gap-2">
+                                <i data-lucide="info" class="w-5 h-5 text-indigo-500"></i> Estás visualizando ${targetText}
+                            </h4>
+                            <p class="text-indigo-700 text-sm mt-1">Los padres y la cocina no verán estos datos. ¿Deseas activarla ahora?</p>
+                        </div>
+                        <button onclick="${fnCall}" class="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-bold shadow-sm flex-shrink-0 transition-colors">
+                            Establecer como Activo
+                        </button>
+                    </div>
+                `;
+            }
+
+            return `
+                <div class="fade-in max-w-4xl mx-auto">
+                    <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-6 gap-4">
+                        <div class="flex-grow">
+                            <h2 class="text-2xl font-bold text-slate-900 flex items-center gap-2 mb-4">
+                                <i data-lucide="school" class="w-6 h-6 text-blue-500"></i> Gestión Escolar
+                            </h2>
+                            
+                            <div class="flex flex-col md:flex-row gap-4">
+                                <div class="flex flex-col gap-1 w-full md:w-auto">
+                                    <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">Ciclo Escolar</label>
+                                    <div class="flex items-center bg-slate-100 border border-slate-300 rounded-lg shadow-sm opacity-70 cursor-not-allowed">
+                                        <select disabled class="bg-transparent text-slate-500 text-sm font-semibold px-3 py-2 outline-none cursor-not-allowed appearance-none pr-8 relative w-full" style="background-image: url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%2394a3b8%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E'); background-repeat: no-repeat; background-position: right 0.7rem top 50%; background-size: 0.65rem auto;">
+                                            ${cycleOptionsHtml}
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div class="flex flex-col gap-1 w-full md:w-auto ${!managingCycle || managingCycle.weeks.length === 0 ? 'opacity-50 pointer-events-none' : ''}">
+                                    <label class="text-xs font-bold text-slate-400 uppercase tracking-wider">Semana</label>
+                                    <div class="flex items-center bg-white border border-slate-300 rounded-lg shadow-sm">
+                                        <select onchange="window.app.setManagingWeek(this.value)" class="bg-transparent text-slate-700 text-sm font-semibold px-3 py-2 outline-none cursor-pointer appearance-none pr-8 relative w-full" style="background-image: url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%231e293b%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E'); background-repeat: no-repeat; background-position: right 0.7rem top 50%; background-size: 0.65rem auto;">
+                                            ${weekOptionsHtml}
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="flex flex-wrap bg-slate-200/60 p-1 rounded-xl gap-1 mt-4 sm:mt-0 self-end">
+                            <button onclick="window.app.setSchoolTab('pedidos')" class="px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-2 ${isPedidos ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}"><i data-lucide="shopping-bag" class="w-4 h-4"></i> Pedidos</button>
+                            <button onclick="window.app.setSchoolTab('menu')" class="px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-2 ${isMenu ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}"><i data-lucide="settings" class="w-4 h-4"></i> Config. Menú</button>
+                        </div>
+                    </div>
+                    
+                    ${activeBannerHtml}
+                    <div class="bg-white p-6 sm:p-8 rounded-3xl shadow-sm border border-slate-100 relative">
+                        ${!managingWeek && isPedidos ? `<div class="p-8 text-center text-slate-500">No hay semanas creadas. Contacta al Administrador.</div>` : contentHtml}
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderParentView() {
+            const activeCycle = getActiveCycle();
+            const activeWeek = getActiveWeek();
+            if(!activeWeek) return `<div class="p-8 text-center text-slate-500">No hay semana configurada por la escuela.</div>`;
+
+            // V3.1: Comprobación del Horario Restringido
+            const schedStatus = window.app.checkHomeOrderSchedule();
+            if (!schedStatus.open) {
+                return `
+                    <div class="fade-in max-w-md mx-auto mt-10">
+                        <div class="bg-white p-8 rounded-3xl shadow-sm border border-slate-200 text-center">
+                            <div class="bg-red-100 text-red-600 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 shadow-inner">
+                                <i data-lucide="clock" class="w-8 h-8"></i>
+                            </div>
+                            <h2 class="text-2xl font-bold text-slate-900 mb-2">Pedidos Cerrados</h2>
+                            <p class="text-slate-500 mb-6 text-sm leading-relaxed">${schedStatus.reason}</p>
+                            <button onclick="window.app.setView('home')" class="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 py-3 rounded-xl font-bold transition-colors">Volver al Inicio</button>
+                        </div>
+                    </div>
+                `;
+            }
+
+            if (!state.loggedStudent) {
+                return `
+                    <div class="fade-in max-w-md mx-auto mt-10">
+                        <div class="bg-white p-8 rounded-3xl shadow-sm border border-slate-200">
+                            <div class="text-center mb-6">
+                                <div class="bg-amber-100 text-amber-600 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+                                    <i data-lucide="home" class="w-8 h-8"></i>
+                                </div>
+                                <h2 class="text-2xl font-bold text-slate-900">Pedido desde Casa</h2>
+                                <p class="text-slate-500 mt-2 text-sm">Ingresa a la cuenta de tu hijo para realizar sus pedidos de la semana.</p>
+                            </div>
+                            
+                            <form onsubmit="window.app.loginCasa(event)" class="space-y-4">
+                                <div>
+                                    <label class="block text-sm font-semibold text-slate-700 mb-1">Clave del Alumno</label>
+                                    <input type="password" id="casa-login-pwd" placeholder="Los 10 primeros dígitos de la CURP" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200 transition-all text-slate-700" required>
+                                </div>
+                                <button type="submit" class="w-full bg-amber-600 hover:bg-amber-700 text-white py-3.5 rounded-xl font-bold text-lg transition-colors flex items-center justify-center gap-2 shadow-sm">
+                                    <i data-lucide="log-in" class="w-5 h-5"></i> Ingresar
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                `;
+            }
+
+            const contactName = state.adminData.contactInfo.name || 'No definido';
+            const contactPhone = state.adminData.contactInfo.phone || 'No asignado';
+
+            return `
+                <div class="fade-in max-w-xl mx-auto">
+                    <div class="text-center mb-6">
+                        <div class="bg-amber-100 text-amber-600 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-3">
+                            <i data-lucide="home" class="w-8 h-8"></i>
+                        </div>
+                        <h2 class="text-2xl font-bold text-slate-900">Pedido desde Casa</h2>
+                        <p class="text-slate-500 mt-1">${activeCycle.name} - <strong class="text-amber-600">${activeWeek.range}</strong></p>
+                        
+                        <div class="mt-4 p-3 bg-white border border-amber-200 rounded-xl inline-block text-left shadow-sm shadow-amber-100/50">
+                            <p class="text-[10px] text-amber-700 uppercase font-bold mb-0.5 tracking-wider flex items-center gap-1"><i data-lucide="phone" class="w-3 h-3"></i> Dudas / Contacto Ventas</p>
+                            <p class="text-sm text-slate-800 font-medium">${contactName}</p>
+                            <p class="text-sm text-slate-600"><a href="tel:${contactPhone}" class="hover:text-amber-600 transition-colors">${contactPhone}</a></p>
+                        </div>
+                    </div>
+                    <div class="bg-white p-6 sm:p-8 rounded-3xl shadow-sm border border-slate-100">
+                        ${renderOrderForm('Casa', activeWeek)}
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderOrderForm(source, targetWeek = null) {
+            const currentDay = state.formSelection.day;
+            const currentGrade = source === 'Casa' ? state.loggedStudent.grade : state.formSelection.grade;
+            
+            const weekData = targetWeek || (source === 'Escuela' ? getManagingWeek() : getActiveWeek());
+            if (!weekData) return '';
+            
+            const isInactiveDay = weekData.inactiveDays && weekData.inactiveDays.includes(currentDay);
+            const availableItems = weekData.menu[currentDay] || [];
+            const availableFoods = availableItems.filter(i => state.adminData.alimentos.includes(i) || (!state.adminData.alimentos.includes(i) && !state.adminData.bebidas.includes(i))); 
+            const availableDrinks = availableItems.filter(i => state.adminData.bebidas.includes(i));
+
+            let daysHtml = '';
+            DIAS_SEMANA.forEach(d => {
+                const isActive = d === currentDay;
+                const btnClass = isActive ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50';
+                daysHtml += `<button type="button" onclick="window.app.updateFormDay('${d}', '${source}')" class="px-4 py-2 rounded-lg text-sm font-medium border transition-colors ${btnClass}">${d}</button>`;
+            });
+
+            let studentGradeHtml = '';
+            if (source === 'Escuela') {
+                let gradesHtml = '';
+                state.adminData.grades.forEach(g => {
+                    const isActive = g === currentGrade;
+                    const btnClass = isActive ? 'bg-indigo-50 border-indigo-300 text-indigo-700 shadow-sm' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50';
+                    gradesHtml += `<button type="button" data-grade="${g}" onclick="window.app.onGradeChange('${g}', '${source}')" class="grade-btn px-4 py-2 rounded-lg text-sm font-bold border transition-colors ${btnClass}">${g}</button>`;
+                });
+                
+                studentGradeHtml = `
+                    <div>
+                        <label class="block text-sm font-semibold text-slate-700 mb-2">Grado y Grupo</label>
+                        <div class="flex flex-wrap gap-2" id="grades-container">
+                            ${gradesHtml || '<span class="text-sm text-slate-500 italic">No hay grados configurados.</span>'}
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-6 mt-6">
+                        <div>
+                            <label class="block text-sm font-semibold text-slate-700 mb-2">Nombre del Alumno</label>
+                            <select id="form-student" disabled class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all text-slate-700 disabled:opacity-50 appearance-none" required>
+                                <option value="">Primero elige un grado</option>
+                            </select>
+                        </div>
+                `;
+                
+                const statuses = ['Pagado', 'Fiado', 'Beca', 'Casa'];
+                const currentPayment = state.formSelection.payment || 'Pagado';
+                let statusButtons = '';
+                statuses.forEach(s => {
+                    const isActive = s === currentPayment;
+                    const btnClass = isActive ? 'bg-emerald-50 border-emerald-300 text-emerald-700 shadow-sm' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50';
+                    statusButtons += `<button type="button" data-status="${s}" onclick="window.app.setPaymentStatus('${s}')" class="payment-btn px-4 py-2 rounded-lg text-sm font-bold border transition-colors ${btnClass}">${s}</button>`;
+                });
+                
+                studentGradeHtml += `
+                        <div>
+                            <label class="block text-sm font-semibold text-slate-700 mb-2 flex items-center gap-2"><i data-lucide="circle-dollar-sign" class="w-4 h-4 text-slate-400"></i> Estatus</label>
+                            <div class="flex flex-wrap gap-2">${statusButtons}</div>
+                        </div>
+                    </div>
+                `;
+            } else {
+                studentGradeHtml = `
+                    <div class="col-span-full bg-amber-50 p-4 rounded-xl border border-amber-100 flex justify-between items-center mb-6">
+                        <div>
+                            <h3 class="font-bold text-amber-900 text-lg sm:text-xl">${state.loggedStudent.name}</h3>
+                            <p class="text-amber-700 text-sm">Grado: <strong>${state.loggedStudent.grade}</strong></p>
+                        </div>
+                        <button type="button" onclick="window.app.logoutCasa()" class="text-sm font-semibold text-red-600 hover:bg-red-50 px-3 py-1.5 rounded-lg transition-colors flex-shrink-0">Salir</button>
+                    </div>
+                    <input type="hidden" id="form-grade" value="${state.loggedStudent.grade}">
+                    <input type="hidden" id="form-student" value="${state.loggedStudent.name}">
+                `;
+            }
+
+            const renderRadioGroup = (items, groupName, emptyMsg) => {
+                if (items.length === 0) return `<div class="bg-slate-50 text-slate-500 p-4 rounded-xl text-sm border border-slate-100 col-span-full">${emptyMsg}</div>`;
+                let html = '';
+                items.forEach(item => {
+                    html += `
+                        <label class="food-label flex items-center p-4 border rounded-xl cursor-pointer transition-all border-slate-200 hover:border-blue-300 hover:bg-slate-50">
+                            <input type="radio" name="${groupName}" value="${item}" class="w-5 h-5 text-blue-600 border-slate-300 focus:ring-blue-500 cursor-pointer" onchange="window.app.selectFood(this)">
+                            <span class="ml-3 font-medium text-slate-700">${item}</span>
+                        </label>
+                    `;
+                });
+                return html;
+            };
+
+            let menusHtml = '';
+            if (isInactiveDay) {
+                menusHtml = `
+                    <div class="bg-red-50 text-red-700 p-6 rounded-xl text-center border border-red-200 col-span-full flex flex-col items-center gap-2 shadow-sm mb-4">
+                        <i data-lucide="calendar-x" class="w-8 h-8 text-red-500"></i>
+                        <h4 class="font-bold text-lg">Día Inhábil</h4>
+                        <p class="text-sm">No hay clases este día, por lo que no se pueden realizar pedidos.</p>
+                    </div>
+                `;
+            } else {
+                menusHtml = `
+                    <div class="mb-4">
+                        <h5 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Alimentos</h5>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            ${renderRadioGroup(availableFoods, 'foodSelection', 'No hay alimentos configurados')}
+                        </div>
+                    </div>
+                    <div>
+                        <h5 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Bebidas</h5>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            ${renderRadioGroup(availableDrinks, 'drinkSelection', 'No hay bebidas configuradas')}
+                        </div>
+                    </div>
+                    <p class="text-xs text-slate-400 mt-3">* Selecciona al menos un alimento o bebida.</p>
+                `;
+            }
+
+            return `
+                <form onsubmit="window.app.submitOrder(event, '${source}')" class="space-y-6">
+                    <input type="hidden" id="form-day" value="${currentDay}">
+                    
+                    ${studentGradeHtml}
+
+                    <div>
+                        <label class="block text-sm font-semibold text-slate-700 mb-2 flex items-center gap-2">
+                            <i data-lucide="calendar" class="w-4 h-4 text-slate-400"></i> ¿Para qué día es el pedido?
+                        </label>
+                        <div class="flex flex-wrap gap-2" id="days-container">
+                            ${daysHtml}
+                        </div>
+                    </div>
+
+                    <div class="pt-6 border-t border-slate-100">
+                        <label class="block text-sm font-semibold text-slate-700 mb-3">
+                            Menú disponible para el <span id="display-day-name">${currentDay}</span>
+                        </label>
+                        
+                        ${menusHtml}
+                    </div>
+
+                    <div id="order-summary" class="hidden mb-6"></div>
+
+                    <button type="submit" id="btn-submit" disabled class="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white py-4 rounded-xl font-bold text-lg transition-colors flex items-center justify-center gap-2 shadow-sm">
+                        <i data-lucide="check-circle-2" class="w-6 h-6"></i> Confirmar Pedido
+                    </button>
+                </form>
+            `;
+        }
+
+        function renderMenuConfigurator() {
+            let daysHtml = '';
+            DIAS_SEMANA.forEach(d => {
+                const isActive = d === state.menuConfigDay;
+                const count = state.draftMenu[d] ? state.draftMenu[d].length : 0;
+                const btnClass = isActive ? 'bg-slate-800 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50';
+                const badgeClass = isActive ? 'bg-slate-600 text-white' : 'bg-slate-200 text-slate-600';
+                const badgeHtml = count > 0 ? `<span class="ml-2 text-xs px-1.5 py-0.5 rounded-full ${badgeClass}">${count}</span>` : '';
+                
+                daysHtml += `<button onclick="window.app.setMenuDay('${d}')" class="px-5 py-2.5 rounded-lg text-sm font-bold border transition-colors ${btnClass}">${d}${badgeHtml}</button>`;
+            });
+
+            const currentSelection = state.draftMenu[state.menuConfigDay] || [];
+            const isInactive = state.draftInactiveDays.includes(state.menuConfigDay);
+            
+            const renderCategory = (items) => {
+                let html = '';
+                items.forEach(item => {
+                    const isSelected = currentSelection.includes(item);
+                    const btnClass = isSelected ? 'border-emerald-500 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-white hover:border-slate-300 text-slate-600';
+                    const circleClass = isSelected ? 'bg-emerald-500 text-white' : 'bg-slate-200';
+                    const checkHtml = isSelected ? `<i data-lucide="check" class="w-3 h-3" stroke-width="4"></i>` : '';
+
+                    html += `
+                        <button onclick="window.app.toggleFood('${item}')" class="flex items-center text-left w-full p-3 rounded-xl border transition-all text-sm ${btnClass}">
+                            <div class="w-5 h-5 rounded-full mr-3 flex items-center justify-center flex-shrink-0 ${circleClass}">
+                                ${checkHtml}
+                            </div>
+                            <span class="font-medium leading-tight">${item}</span>
+                        </button>
+                    `;
+                });
+                return html;
+            };
+
+            let configBodyHtml = '';
+            if (isInactive) {
+                configBodyHtml = `
+                    <div class="py-10 text-center flex flex-col items-center justify-center bg-white rounded-xl border border-red-100 shadow-sm">
+                        <div class="bg-red-50 p-4 rounded-full mb-3"><i data-lucide="calendar-off" class="w-8 h-8 text-red-500"></i></div>
+                        <h4 class="font-bold text-slate-800 text-lg">Día Inhábil Activado</h4>
+                        <p class="text-slate-500 text-sm mt-1 max-w-sm">Has marcado este día como inhábil. No se mostrará menú ni se aceptarán pedidos.</p>
+                    </div>
+                `;
+            } else {
+                configBodyHtml = `
+                    <div class="flex items-center justify-between mb-4 border-b border-slate-200 pb-3">
+                        <span class="font-semibold text-slate-700">Opciones para el ${state.menuConfigDay}</span>
+                        <span class="text-sm font-normal text-slate-500 bg-white px-2 py-1 rounded-md border">${currentSelection.length} seleccionados</span>
+                    </div>
+                    
+                    <h5 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Alimentos</h5>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 mb-6">
+                        ${renderCategory(state.adminData.alimentos)}
+                    </div>
+                    
+                    <h5 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Bebidas</h5>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                        ${renderCategory(state.adminData.bebidas)}
+                    </div>
+                `;
+            }
+
+            return `
+                <div class="space-y-6">
+                    <div>
+                        <h3 class="font-bold text-lg text-slate-900 mb-2">Diseño del Menú</h3>
+                        <p class="text-slate-500 text-sm mb-6">Configurando opciones para la semana: <strong>${getManagingWeek().range}</strong>.</p>
+                        
+                        <div class="flex flex-wrap gap-2 mb-6">
+                            ${daysHtml}
+                        </div>
+
+                        <div class="bg-slate-50 p-6 rounded-2xl border border-slate-100">
+                            <div class="mb-6 bg-white p-4 rounded-xl border ${isInactive ? 'border-red-300 bg-red-50/50' : 'border-slate-200'} flex items-center justify-between shadow-sm transition-colors">
+                                <div>
+                                    <h4 class="font-bold ${isInactive ? 'text-red-700' : 'text-slate-700'} flex items-center gap-2">
+                                        <i data-lucide="calendar-x" class="w-5 h-5 ${isInactive ? 'text-red-500' : 'text-slate-400'}"></i>
+                                        Marcar como Día Inhábil
+                                    </h4>
+                                    <p class="text-xs ${isInactive ? 'text-red-600/80' : 'text-slate-500'} mt-1">Activa esta opción si no habrá clases este día.</p>
+                                </div>
+                                <label class="relative inline-flex items-center cursor-pointer">
+                                    <input type="checkbox" onchange="window.app.toggleInactiveDay('${state.menuConfigDay}', this.checked)" ${isInactive ? 'checked' : ''} class="sr-only peer">
+                                    <div class="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-500"></div>
+                                </label>
+                            </div>
+
+                            ${configBodyHtml}
+                        </div>
+                    </div>
+                    <div class="pt-4 border-t border-slate-100 flex justify-end">
+                        <button onclick="window.app.saveMenu()" class="bg-slate-900 hover:bg-slate-800 text-white px-8 py-3 rounded-xl font-bold transition-colors flex items-center gap-2">
+                            <i data-lucide="save" class="w-5 h-5"></i> Guardar Menú
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderAdminView() {
+            const managingCycle = getManagingCycle();
+            
+            let cycleOptionsHtml = '';
+            state.cycles.forEach(c => {
+                let statusLabel = c.id === state.activeCycleId ? ' (Activo)' : '';
+                cycleOptionsHtml += `<option value="${c.id}" ${c.id === state.managingCycleId ? 'selected' : ''}>${c.name}${statusLabel}</option>`;
+            });
+
+            let weekOptionsHtml = '';
+            if (managingCycle && managingCycle.weeks.length > 0) {
+                managingCycle.weeks.forEach(w => {
+                    let statusLabel = w.status === 'active' ? ' (Activa)' : w.status === 'archived' ? ' (Archivada)' : ' (Planeada)';
+                    weekOptionsHtml += `<option value="${w.id}" ${w.id === state.managingWeekId ? 'selected' : ''}>${w.range}${statusLabel}</option>`;
+                });
+            } else {
+                weekOptionsHtml = `<option value="">Sin semanas creadas</option>`;
+            }
+
+            let gradesListHtml = '';
+            state.adminData.grades.forEach(g => {
+                gradesListHtml += `
+                    <div class="flex items-center justify-between bg-white border border-slate-200 p-2 rounded-lg shadow-sm">
+                        <span class="font-medium text-slate-700 truncate w-full pr-2" title="${g}">${g}</span>
+                        <div class="flex items-center flex-shrink-0">
+                            <button onclick="window.app.editAdminItem('grade', '${g.replace(/'/g, "\\'")}')" class="text-blue-500 hover:bg-blue-50 p-1 rounded-md transition-colors mr-1">
+                                <i data-lucide="pencil" class="w-4 h-4"></i>
+                            </button>
+                            <button onclick="window.app.deleteAdminItem('grade', '${g.replace(/'/g, "\\'")}')" class="text-red-500 hover:bg-red-50 p-1 rounded-md transition-colors">
+                                <i data-lucide="trash-2" class="w-4 h-4"></i>
+                            </button>
+                        </div>
+                    </div>
+                `;
+            });
+
+            let gradesOptionsHtml = '<option value="">Selecciona un grado...</option>';
+            state.adminData.grades.forEach(g => {
+                gradesOptionsHtml += `<option value="${g}" ${state.adminSelectedGrade === g ? 'selected' : ''}>${g}</option>`;
+            });
+
+            let studentsListHtml = '';
+            let isAllStudentsSelected = false;
+            if (state.adminSelectedGrade) {
+                const students = state.adminData.students[state.adminSelectedGrade] || [];
+                const searchQuery = (state.adminStudentSearch || '').toLowerCase();
+                const filteredStudents = students.filter(s => s.name.toLowerCase().includes(searchQuery) || (s.curp && s.curp.toLowerCase().includes(searchQuery)));
+                
+                isAllStudentsSelected = filteredStudents.length > 0 && filteredStudents.every(s => state.adminSelectedStudents.includes(s.id));
+
+                if (students.length === 0) {
+                    studentsListHtml = `<p class="text-slate-500 text-sm italic col-span-full">No hay alumnos en este grado.</p>`;
+                } else if (filteredStudents.length === 0) {
+                    studentsListHtml = `<p class="text-slate-500 text-sm italic col-span-full">No se encontraron coincidencias.</p>`;
+                } else {
+                    filteredStudents.forEach(s => {
+                        const isSelected = state.adminSelectedStudents.includes(s.id);
+                        const isBlocked = s.isBlocked;
+                        studentsListHtml += `
+                            <div class="flex items-center justify-between bg-white border ${isSelected ? 'border-blue-400 bg-blue-50/50' : (isBlocked ? 'border-red-200 bg-red-50/30' : 'border-slate-200')} p-2 rounded-lg shadow-sm transition-colors">
+                                <div class="flex items-center gap-2 flex-grow min-w-0">
+                                    <input type="checkbox" onchange="window.app.toggleStudentSelect('${s.id}')" ${isSelected ? 'checked' : ''} class="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500 cursor-pointer flex-shrink-0">
+                                    <div class="flex flex-col min-w-0">
+                                        <div class="flex items-center">
+                                            <span class="font-medium ${isBlocked ? 'text-red-700 line-through opacity-70' : 'text-slate-700'} text-sm truncate" title="${s.name}">${s.name}</span>
+                                            ${isBlocked ? '<span class="ml-2 text-[9px] bg-red-100 text-red-600 font-bold px-1.5 py-0.5 rounded uppercase">Bloqueado</span>' : ''}
+                                        </div>
+                                        ${s.password ? `<span class="text-[10px] text-slate-400 truncate">Pwd: ${s.password}</span>` : `<span class="text-[10px] text-red-400 truncate">Sin Pwd</span>`}
+                                    </div>
+                                </div>
+                                <div class="flex items-center flex-shrink-0">
+                                    <button type="button" onclick="window.app.toggleStudentBlock('${s.id}')" class="${isBlocked ? 'text-emerald-600 hover:bg-emerald-100' : 'text-amber-500 hover:bg-amber-100'} p-1.5 rounded-md transition-colors mr-1" title="${isBlocked ? 'Permitir Pedidos (Desbloquear)' : 'Bloquear Pedidos en Casa'}">
+                                        <i data-lucide="${isBlocked ? 'unlock' : 'lock'}" class="w-4 h-4"></i>
+                                    </button>
+                                    <button type="button" onclick="window.app.openEditStudentModal('${s.id}')" class="text-blue-500 hover:bg-blue-50 p-1.5 rounded-md transition-colors mr-1">
+                                        <i data-lucide="pencil" class="w-4 h-4"></i>
+                                    </button>
+                                    <button type="button" onclick="window.app.deleteAdminItem('student', '${s.id}')" class="text-red-500 hover:bg-red-50 p-1.5 rounded-md transition-colors">
+                                        <i data-lucide="trash-2" class="w-4 h-4"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                    });
+                }
+            } else {
+                studentsListHtml = `<p class="text-slate-500 text-sm italic col-span-full">Selecciona un grado para ver sus alumnos.</p>`;
+            }
+
+            const renderCatalogList = (sourceArray, searchState, selectedState, catType) => {
+                let html = '';
+                const q = (searchState || '').toLowerCase();
+                const filtered = sourceArray.filter(c => c.toLowerCase().includes(q));
+                
+                if (filtered.length === 0 && sourceArray.length > 0) {
+                    return `<p class="text-slate-500 text-sm italic col-span-full">No se encontraron coincidencias.</p>`;
+                }
+                filtered.forEach(item => {
+                    const isSelected = selectedState.includes(item);
+                    const color = catType === 'alimento' ? 'amber' : 'sky';
+                    html += `
+                        <div class="flex items-center justify-between bg-white border ${isSelected ? `border-${color}-400 bg-${color}-50/50` : 'border-slate-200'} p-2 rounded-lg shadow-sm transition-colors">
+                            <div class="flex items-center gap-2 flex-grow min-w-0">
+                                <input type="checkbox" onchange="window.app.toggleCatalogSelect('${catType}s', '${item.replace(/'/g, "\\'")}')" ${isSelected ? 'checked' : ''} class="w-4 h-4 text-${color}-600 rounded border-slate-300 focus:ring-${color}-500 cursor-pointer flex-shrink-0">
+                                <span class="font-medium text-slate-700 text-sm truncate w-full pr-2" title="${item}">${item}</span>
+                            </div>
+                            <div class="flex items-center flex-shrink-0">
+                                <button onclick="window.app.editAdminItem('${catType}', '${item.replace(/'/g, "\\'")}')" class="text-blue-500 hover:bg-blue-50 p-1 rounded-md transition-colors mr-1"><i data-lucide="pencil" class="w-4 h-4"></i></button>
+                                <button onclick="window.app.deleteAdminItem('${catType}', '${item.replace(/'/g, "\\'")}')" class="text-red-500 hover:bg-red-50 p-1 rounded-md transition-colors"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                            </div>
+                        </div>`;
+                });
+                return html;
+            };
+
+            const alimentosListHtml = renderCatalogList(state.adminData.alimentos, state.adminAlimentoSearch, state.adminSelectedAlimentos, 'alimento');
+            const bebidasListHtml = renderCatalogList(state.adminData.bebidas, state.adminBebidaSearch, state.adminSelectedBebidas, 'bebida');
+            
+            const isAllAlimentosSelected = state.adminData.alimentos.filter(c => c.toLowerCase().includes((state.adminAlimentoSearch||'').toLowerCase())).length > 0 && state.adminData.alimentos.filter(c => c.toLowerCase().includes((state.adminAlimentoSearch||'').toLowerCase())).every(c => state.adminSelectedAlimentos.includes(c));
+            const isAllBebidasSelected = state.adminData.bebidas.filter(c => c.toLowerCase().includes((state.adminBebidaSearch||'').toLowerCase())).length > 0 && state.adminData.bebidas.filter(c => c.toLowerCase().includes((state.adminBebidaSearch||'').toLowerCase())).every(c => state.adminSelectedBebidas.includes(c));
+
+            let reportCycleOptionsHtml = '';
+            state.cycles.forEach(c => { reportCycleOptionsHtml += `<option value="${c.id}" ${c.id === state.reportCycleId ? 'selected' : ''}>${c.name}</option>`; });
+            
+            const reportCycle = state.cycles.find(c => c.id === state.reportCycleId) || getActiveCycle();
+            let reportWeekOptionsHtml = '';
+            if (reportCycle && reportCycle.weeks) {
+                reportCycle.weeks.forEach(w => { reportWeekOptionsHtml += `<option value="${w.id}" ${w.id === state.reportWeekId ? 'selected' : ''}>${w.range}${w.status === 'active' ? ' (Activa)' : w.status === 'archived' ? ' (Archivada)' : ' (Planeada)'}</option>`; });
+            }
+
+            const totalStudentsCount = Object.values(state.adminData.students).reduce((sum, arr) => sum + arr.length, 0);
+            let reportRowsHtml = '';
+            let gt = { total: 0, noPid: 0, escuela: 0, casa: 0, pagado: 0, fiado: 0, beca: 0 };
+            
+            const reportWeek = reportCycle?.weeks?.find(w => w.id === state.reportWeekId);
+
+            if (reportWeek) {
+                DIAS_SEMANA.forEach(day => {
+                    const ordersDay = (reportWeek.orders || []).filter(o => o.dayFor === day);
+                    const t = ordersDay.length;
+                    const nop = totalStudentsCount > 0 ? (totalStudentsCount - t) : 0; 
+                    const esc = ordersDay.filter(o => o.source === 'Escuela').length;
+                    const cas = ordersDay.filter(o => o.source === 'Casa').length;
+                    const pag = ordersDay.filter(o => o.paymentStatus === 'Pagado').length;
+                    const fia = ordersDay.filter(o => o.paymentStatus === 'Fiado').length;
+                    const bec = ordersDay.filter(o => o.paymentStatus === 'Beca').length;
+
+                    gt.total += t; gt.noPid += nop; gt.escuela += esc; gt.casa += cas;
+                    gt.pagado += pag; gt.fiado += fia; gt.beca += bec;
+
+                    reportRowsHtml += `
+                        <tr class="border-b border-slate-100 hover:bg-slate-50 transition-colors">
+                            <td class="p-3 font-semibold text-slate-700">${day}</td>
+                            <td class="p-3 text-center font-bold text-blue-600">${t}</td>
+                            <td class="p-3 text-center text-slate-500">${nop}</td>
+                            <td class="p-3 text-center">${esc}</td>
+                            <td class="p-3 text-center">${cas}</td>
+                            <td class="p-3 text-center text-emerald-600">${pag}</td>
+                            <td class="p-3 text-center text-amber-600">${fia}</td>
+                            <td class="p-3 text-center text-purple-600">${bec}</td>
+                        </tr>
+                    `;
+                });
+                reportRowsHtml += `
+                    <tr class="bg-slate-100/50 font-bold text-slate-800 border-t-2 border-slate-200">
+                        <td class="p-3">TOTAL SEMANA</td>
+                        <td class="p-3 text-center text-blue-700 text-lg">${gt.total}</td>
+                        <td class="p-3 text-center text-slate-500">${gt.noPid}</td>
+                        <td class="p-3 text-center">${gt.escuela}</td>
+                        <td class="p-3 text-center">${gt.casa}</td>
+                        <td class="p-3 text-center text-emerald-700">${gt.pagado}</td>
+                        <td class="p-3 text-center text-amber-700">${gt.fiado}</td>
+                        <td class="p-3 text-center text-purple-700">${gt.beca}</td>
+                    </tr>
+                `;
+            } else {
+                reportRowsHtml = `<tr><td colspan="8" class="p-4 text-center text-slate-500 italic">No hay datos de semanas para este ciclo.</td></tr>`;
+            }
+
+            let adminDaysHtml = '';
+            DIAS_SEMANA.forEach(d => {
+                const isActive = d === state.adminOrderDay;
+                const btnClass = isActive ? 'bg-indigo-600 text-white shadow-md' : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200';
+                adminDaysHtml += `<button onclick="window.app.setAdminOrderDay('${d}')" class="px-3 py-1.5 rounded-lg text-sm font-bold transition-colors ${btnClass}">${d}</button>`;
+            });
+
+            let adminGradesOptionsHtml = `<option value="Todos">Todos los grados</option>`;
+            state.adminData.grades.forEach(g => {
+                adminGradesOptionsHtml += `<option value="${g}" ${state.adminOrderGrade === g ? 'selected' : ''}>${g}</option>`;
+            });
+
+            let adminOrdersHtml = '';
+            if (reportWeek) {
+                let adminFilteredOrders = (reportWeek.orders || []).filter(o => o.dayFor === state.adminOrderDay);
+                if (state.adminOrderGrade !== 'Todos') {
+                    adminFilteredOrders = adminFilteredOrders.filter(o => o.grade === state.adminOrderGrade);
+                }
+
+                if (adminFilteredOrders.length === 0) {
+                    adminOrdersHtml = `<p class="text-slate-500 italic text-center py-4">No hay pedidos registrados con estos filtros.</p>`;
+                } else {
+                    adminFilteredOrders.forEach(o => {
+                        adminOrdersHtml += `
+                            <div class="flex justify-between items-center text-slate-800 bg-white p-3 rounded-lg border border-slate-200 shadow-sm transition-all hover:border-slate-300">
+                                <div class="flex flex-col sm:flex-row sm:items-center gap-2 flex-wrap">
+                                    <span class="font-bold text-sm w-12 text-slate-400">${o.grade}</span>
+                                    <span class="font-bold">${o.studentName}</span> 
+                                    <span class="text-blue-700 bg-blue-100/50 px-2 py-0.5 rounded text-xs font-medium w-fit">${o.breakfastType}</span>
+                                    ${window.app.getPaymentBadge(o.paymentStatus)}
+                                    <span class="text-[10px] uppercase font-bold tracking-wider text-slate-500 border border-slate-200 px-1.5 rounded">${o.source}</span>
+                                </div>
+                                <div class="flex items-center gap-1 ml-2 flex-shrink-0">
+                                    <button type="button" onclick="window.app.editOrder('${o.id}', 'Admin')" class="text-blue-500 hover:bg-blue-100 p-1.5 rounded-md transition-colors" title="Editar Pedido">
+                                        <i data-lucide="pencil" class="w-4 h-4"></i>
+                                    </button>
+                                    <button type="button" onclick="window.app.deleteOrder('${o.id}', 'Admin')" class="text-red-500 hover:bg-red-100 p-1.5 rounded-md transition-colors" title="Eliminar Pedido">
+                                        <i data-lucide="trash-2" class="w-4 h-4"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        `;
+                    });
+                }
+            } else {
+                adminOrdersHtml = `<p class="text-slate-500 italic text-center py-4">Selecciona una semana arriba en el Reporte de Ventas.</p>`;
+            }
+
+            let studentAddFormHtml = '';
+            if (state.adminStudentAddMode === 'masivo') {
+                studentAddFormHtml = `
+                    <form onsubmit="window.app.addAdminItem(event, 'student')" class="flex flex-col gap-2">
+                        <textarea id="new-student-input" rows="3" placeholder="Pega el listado (Ej: AICP141015MSLDRTA7 ADRIANO/CORONA*PATRICIA ISABEL)" class="flex-grow bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 resize-none font-mono text-xs" required ${!state.adminSelectedGrade ? 'disabled' : ''}></textarea>
+                        <button type="submit" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50" ${!state.adminSelectedGrade ? 'disabled' : ''}>Añadir Masivamente</button>
+                    </form>
+                `;
+            } else {
+                studentAddFormHtml = `
+                    <form onsubmit="window.app.addSingleStudent(event)" class="flex flex-col gap-2">
+                        <input type="text" id="ind-nombre" placeholder="Nombre completo" class="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-emerald-500" required ${!state.adminSelectedGrade ? 'disabled' : ''}>
+                        <div class="flex gap-2">
+                            <input type="text" id="ind-curp" placeholder="CURP (Opcional)" oninput="document.getElementById('ind-pwd').value = this.value.substring(0,10)" class="w-1/2 bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-emerald-500" ${!state.adminSelectedGrade ? 'disabled' : ''}>
+                            <input type="text" id="ind-pwd" placeholder="Contraseña (Auto)" class="w-1/2 bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-emerald-500" required ${!state.adminSelectedGrade ? 'disabled' : ''}>
+                        </div>
+                        <button type="submit" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50" ${!state.adminSelectedGrade ? 'disabled' : ''}>Añadir Alumno</button>
+                    </form>
+                `;
+            }
+
+            const sched = state.adminData.settings?.homeOrderSchedule || { mode: 'always', days: [1,2,3,4,5], start: '07:00', end: '16:00' };
+            const daysObj = [
+                { id: 1, name: 'L' }, { id: 2, name: 'M' }, { id: 3, name: 'M' },
+                { id: 4, name: 'J' }, { id: 5, name: 'V' }, { id: 6, name: 'S' }, { id: 0, name: 'D' }
+            ];
+
+            let scheduleHtml = `
+                <div>
+                    <h5 class="text-xs font-bold text-slate-500 mb-3 uppercase tracking-wider border-b border-slate-100 pb-2">Horario Pedidos (Casa)</h5>
+                    <div class="space-y-3">
+                        <div class="flex flex-col sm:flex-row sm:items-center gap-3">
+                            <label class="flex items-center gap-2 cursor-pointer text-sm text-slate-700 bg-slate-50 px-3 py-2 rounded-lg border border-slate-200 hover:bg-blue-50 w-full sm:w-auto">
+                                <input type="radio" name="sched_mode" value="always" ${sched.mode === 'always' ? 'checked' : ''} onchange="window.app.updateScheduleMode(this.value)" class="w-4 h-4 text-blue-600">
+                                Siempre Abierto
+                            </label>
+                            <label class="flex items-center gap-2 cursor-pointer text-sm text-slate-700 bg-slate-50 px-3 py-2 rounded-lg border border-slate-200 hover:bg-blue-50 w-full sm:w-auto">
+                                <input type="radio" name="sched_mode" value="scheduled" ${sched.mode === 'scheduled' ? 'checked' : ''} onchange="window.app.updateScheduleMode(this.value)" class="w-4 h-4 text-blue-600">
+                                Restringido
+                            </label>
+                        </div>
+                        
+                        <div class="${sched.mode === 'scheduled' ? 'block' : 'hidden'} bg-blue-50/50 p-4 rounded-xl border border-blue-100">
+                            <p class="text-xs font-bold text-slate-600 mb-2">Días Activos:</p>
+                            <div class="flex flex-wrap gap-1.5 mb-4">
+                                ${daysObj.map(d => `
+                                    <label class="flex items-center gap-1 bg-white px-2.5 py-1.5 rounded-lg border border-slate-200 cursor-pointer text-xs font-semibold shadow-sm hover:border-blue-300">
+                                        <input type="checkbox" onchange="window.app.toggleScheduleDay(${d.id})" ${sched.days.includes(d.id) ? 'checked' : ''} class="w-3.5 h-3.5 text-blue-600 rounded">
+                                        ${d.name}
+                                    </label>
+                                `).join('')}
+                            </div>
+                            <p class="text-xs font-bold text-slate-600 mb-2">Rango de Horas:</p>
+                            <div class="flex items-center gap-3">
+                                <div class="flex-1">
+                                    <input type="time" id="sched_start" value="${sched.start}" onchange="window.app.saveScheduleTime()" class="border border-slate-300 rounded-lg px-3 py-2 text-sm w-full outline-none focus:border-blue-500 bg-white shadow-sm">
+                                </div>
+                                <span class="text-slate-400 font-bold">-</span>
+                                <div class="flex-1">
+                                    <input type="time" id="sched_end" value="${sched.end}" onchange="window.app.saveScheduleTime()" class="border border-slate-300 rounded-lg px-3 py-2 text-sm w-full outline-none focus:border-blue-500 bg-white shadow-sm">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            return `
+                <div class="space-y-8 animate-in fade-in duration-300">
+                    <div class="border-b border-slate-100 pb-4">
+                        <h3 class="font-bold text-2xl text-slate-900 flex items-center gap-2">
+                            <i data-lucide="database" class="w-6 h-6 text-slate-600"></i> Administración del Sistema
+                        </h3>
+                        <p class="text-slate-500 text-sm mt-1">Gestiona ciclos, catálogos, reportes y accesos.</p>
+                    </div>
+
+                    <div class="bg-indigo-50 p-5 rounded-2xl border border-indigo-100 flex flex-col shadow-sm">
+                        <h4 class="font-semibold text-indigo-900 mb-4 flex items-center gap-2"><i data-lucide="calendar-days" class="w-5 h-5 text-indigo-600"></i> Planificación de Ciclos y Semanas</h4>
+                        
+                        <div class="flex flex-col md:flex-row gap-6">
+                            <div class="flex flex-col gap-1 w-full md:w-1/2">
+                                <label class="text-xs font-bold text-indigo-400 uppercase tracking-wider">Ciclo Escolar</label>
+                                <div class="flex items-center bg-white border border-indigo-200 rounded-lg shadow-sm">
+                                    <select onchange="window.app.setManagingCycle(this.value)" class="bg-transparent text-slate-700 text-sm font-semibold px-3 py-2 outline-none cursor-pointer appearance-none pr-8 relative w-full" style="background-image: url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%231e293b%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E'); background-repeat: no-repeat; background-position: right 0.7rem top 50%; background-size: 0.65rem auto;">
+                                        ${cycleOptionsHtml}
+                                    </select>
+                                    <div class="flex items-center border-l border-indigo-100">
+                                        <button onclick="window.app.editManagingCycle()" class="p-2 text-blue-600 hover:bg-blue-50 transition-colors" title="Editar Ciclo"><i data-lucide="pencil" class="w-4 h-4"></i></button>
+                                        <button onclick="window.app.deleteManagingCycle()" class="p-2 text-red-600 hover:bg-red-50 transition-colors" title="Eliminar Ciclo"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                                        <button onclick="window.app.createNewCycle()" class="p-2 text-emerald-600 hover:bg-emerald-50 rounded-r-lg transition-colors" title="Nuevo Ciclo"><i data-lucide="plus-circle" class="w-4 h-4"></i></button>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="flex flex-col gap-1 w-full md:w-1/2 ${!managingCycle || managingCycle.weeks.length === 0 ? 'opacity-50 pointer-events-none' : ''}">
+                                <label class="text-xs font-bold text-indigo-400 uppercase tracking-wider">Semana</label>
+                                <div class="flex items-center bg-white border border-indigo-200 rounded-lg shadow-sm">
+                                    <select onchange="window.app.setManagingWeek(this.value)" class="bg-transparent text-slate-700 text-sm font-semibold px-3 py-2 outline-none cursor-pointer appearance-none pr-8 relative w-full" style="background-image: url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%231e293b%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E'); background-repeat: no-repeat; background-position: right 0.7rem top 50%; background-size: 0.65rem auto;">
+                                        ${weekOptionsHtml}
+                                    </select>
+                                    <div class="flex items-center border-l border-indigo-100">
+                                        <button onclick="window.app.editManagingWeek()" class="p-2 text-blue-600 hover:bg-blue-50 transition-colors" title="Editar Semana"><i data-lucide="pencil" class="w-4 h-4"></i></button>
+                                        <button onclick="window.app.deleteManagingWeek()" class="p-2 text-red-600 hover:bg-red-50 transition-colors" title="Eliminar Semana"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                                        <button onclick="window.app.createNewWeek()" class="p-2 text-indigo-600 hover:bg-indigo-50 rounded-r-lg transition-colors" title="Nueva Semana"><i data-lucide="plus-square" class="w-4 h-4"></i></button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-slate-50 p-5 rounded-2xl border border-slate-100 flex flex-col mb-4 shadow-sm">
+                        <h4 class="font-semibold text-slate-800 mb-4 flex items-center gap-2"><i data-lucide="graduation-cap" class="w-5 h-5 text-blue-500"></i> Grados</h4>
+                        <form onsubmit="window.app.addAdminItem(event, 'grade')" class="flex gap-2 mb-4 w-full md:w-1/2">
+                            <input type="text" id="new-grade-input" placeholder="Ej. 1A" class="flex-grow bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" required>
+                            <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-sm font-semibold transition-colors">Añadir</button>
+                        </form>
+                        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2 max-h-40 overflow-y-auto custom-scrollbar pr-1">
+                            ${gradesListHtml}
+                        </div>
+                    </div>
+
+                    <div class="bg-slate-50 p-5 rounded-2xl border border-slate-100 flex flex-col shadow-sm">
+                        <div class="flex items-center justify-between mb-4">
+                            <h4 class="font-semibold text-slate-800 flex items-center gap-2"><i data-lucide="users" class="w-5 h-5 text-emerald-500"></i> Alumnos</h4>
+                            ${state.adminSelectedStudents.length > 0 ? `<button onclick="window.app.deleteSelectedStudents()" class="text-xs font-bold text-red-600 bg-red-100 hover:bg-red-200 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1"><i data-lucide="trash-2" class="w-3 h-3"></i> Eliminar (${state.adminSelectedStudents.length})</button>` : ''}
+                        </div>
+                        
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-4">
+                            <div>
+                                <select onchange="window.app.adminSelectGrade(this.value)" class="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 appearance-none font-medium mb-3">
+                                    ${gradesOptionsHtml}
+                                </select>
+                                <div class="flex bg-slate-200 p-1 rounded-lg w-full mb-3">
+                                    <button onclick="window.app.setStudentAddMode('masivo')" class="${state.adminStudentAddMode === 'masivo' ? 'bg-white shadow text-emerald-700' : 'text-slate-500 hover:text-slate-700'} flex-1 px-3 py-1.5 rounded text-xs font-bold transition-all">Masivo CURP</button>
+                                    <button onclick="window.app.setStudentAddMode('individual')" class="${state.adminStudentAddMode === 'individual' ? 'bg-white shadow text-emerald-700' : 'text-slate-500 hover:text-slate-700'} flex-1 px-3 py-1.5 rounded text-xs font-bold transition-all">Individual</button>
+                                </div>
+                                ${studentAddFormHtml}
+                            </div>
+                            
+                            <div class="flex flex-col h-full border border-slate-200 rounded-xl bg-slate-50/50">
+                                <div class="flex items-center gap-2 p-2 border-b border-slate-200">
+                                    <div class="relative flex-grow">
+                                        <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-2.5"></i>
+                                        <input type="text" oninput="window.app.setSearch('student', this.value)" value="${state.adminStudentSearch || ''}" placeholder="Buscar alumno..." class="w-full bg-white border border-slate-200 rounded-md pl-9 pr-3 py-1.5 text-sm outline-none focus:border-emerald-500" ${!state.adminSelectedGrade ? 'disabled' : ''}>
+                                    </div>
+                                    <label class="flex items-center gap-1.5 text-xs text-slate-600 bg-white px-2 py-1.5 rounded-md cursor-pointer hover:bg-slate-100 transition-colors border border-slate-200 ${!state.adminSelectedGrade ? 'opacity-50 pointer-events-none' : ''}">
+                                        <input type="checkbox" onchange="window.app.toggleAllStudents(this.checked)" ${isAllStudentsSelected ? 'checked' : ''} class="w-3.5 h-3.5 text-emerald-600 rounded border-slate-300"> Todos
+                                    </label>
+                                </div>
+                                <div class="flex-grow p-2 overflow-y-auto max-h-60 custom-scrollbar space-y-1.5">
+                                    ${studentsListHtml}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                        <div class="bg-slate-50 p-5 rounded-2xl border border-slate-100 flex flex-col shadow-sm">
+                            <div class="flex items-center justify-between mb-4">
+                                <h4 class="font-semibold text-slate-800 flex items-center gap-2"><i data-lucide="pizza" class="w-5 h-5 text-amber-500"></i> Alimentos</h4>
+                                ${state.adminSelectedAlimentos.length > 0 ? `<button onclick="window.app.deleteSelectedCatalog('alimentos')" class="text-xs font-bold text-red-600 bg-red-100 hover:bg-red-200 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1"><i data-lucide="trash-2" class="w-3 h-3"></i> Eliminar (${state.adminSelectedAlimentos.length})</button>` : ''}
+                            </div>
+                            <form onsubmit="window.app.addAdminItem(event, 'alimento')" class="flex flex-col gap-2 mb-4">
+                                <textarea id="new-alimento-input" rows="2" placeholder="Ej. Torta (separa con comas para añadir varios)" class="flex-grow bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 resize-none" required></textarea>
+                                <button type="submit" class="bg-amber-600 hover:bg-amber-700 text-white w-full py-2 rounded-lg text-sm font-semibold transition-colors">Añadir Alimento</button>
+                            </form>
+                            <div class="flex flex-col sm:flex-row gap-2 mb-2 pt-2 border-t border-slate-200">
+                                <div class="relative flex-grow">
+                                    <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-2.5"></i>
+                                    <input type="text" oninput="window.app.setSearch('alimento', this.value)" value="${state.adminAlimentoSearch || ''}" placeholder="Buscar alimento..." class="w-full bg-white border border-slate-200 rounded-lg pl-9 pr-3 py-2 text-sm outline-none focus:border-amber-500">
+                                </div>
+                                <label class="flex items-center gap-2 text-sm text-slate-600 bg-slate-100 px-3 py-2 rounded-lg cursor-pointer hover:bg-slate-200 border border-slate-200"><input type="checkbox" onchange="window.app.toggleAllCatalog('alimentos', this.checked)" ${isAllAlimentosSelected ? 'checked' : ''} class="w-4 h-4 text-amber-600 rounded"> Sel. Todo</label>
+                            </div>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 flex-grow max-h-60 overflow-y-auto custom-scrollbar pr-1 content-start">${alimentosListHtml}</div>
+                        </div>
+
+                        <div class="bg-slate-50 p-5 rounded-2xl border border-slate-100 flex flex-col shadow-sm">
+                            <div class="flex items-center justify-between mb-4">
+                                <h4 class="font-semibold text-slate-800 flex items-center gap-2"><i data-lucide="cup-soda" class="w-5 h-5 text-sky-500"></i> Bebidas</h4>
+                                ${state.adminSelectedBebidas.length > 0 ? `<button onclick="window.app.deleteSelectedCatalog('bebidas')" class="text-xs font-bold text-red-600 bg-red-100 hover:bg-red-200 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1"><i data-lucide="trash-2" class="w-3 h-3"></i> Eliminar (${state.adminSelectedBebidas.length})</button>` : ''}
+                            </div>
+                            <form onsubmit="window.app.addAdminItem(event, 'bebida')" class="flex flex-col gap-2 mb-4">
+                                <textarea id="new-bebida-input" rows="2" placeholder="Ej. Jugo (separa con comas para añadir varios)" class="flex-grow bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 resize-none" required></textarea>
+                                <button type="submit" class="bg-sky-600 hover:bg-sky-700 text-white w-full py-2 rounded-lg text-sm font-semibold transition-colors">Añadir Bebida</button>
+                            </form>
+                            <div class="flex flex-col sm:flex-row gap-2 mb-2 pt-2 border-t border-slate-200">
+                                <div class="relative flex-grow">
+                                    <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-2.5"></i>
+                                    <input type="text" oninput="window.app.setSearch('bebida', this.value)" value="${state.adminBebidaSearch || ''}" placeholder="Buscar bebida..." class="w-full bg-white border border-slate-200 rounded-lg pl-9 pr-3 py-2 text-sm outline-none focus:border-sky-500">
+                                </div>
+                                <label class="flex items-center gap-2 text-sm text-slate-600 bg-slate-100 px-3 py-2 rounded-lg cursor-pointer hover:bg-slate-200 border border-slate-200"><input type="checkbox" onchange="window.app.toggleAllCatalog('bebidas', this.checked)" ${isAllBebidasSelected ? 'checked' : ''} class="w-4 h-4 text-sky-600 rounded"> Sel. Todo</label>
+                            </div>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 flex-grow max-h-60 overflow-y-auto custom-scrollbar pr-1 content-start">${bebidasListHtml}</div>
+                        </div>
+                    </div>
+
+                    <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                        <div class="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4 border-b border-slate-100 pb-4">
+                            <h4 class="font-semibold text-slate-800 flex items-center gap-2 text-xl"><i data-lucide="bar-chart-3" class="w-6 h-6 text-indigo-500"></i> Reporte de Ventas</h4>
+                            <div class="flex gap-2">
+                                <select onchange="window.app.setReportCycle(this.value)" class="bg-slate-50 border border-slate-300 text-slate-700 text-sm font-semibold rounded-lg px-4 py-2 outline-none cursor-pointer shadow-sm">${reportCycleOptionsHtml}</select>
+                                <select onchange="window.app.setReportWeek(this.value)" class="bg-slate-50 border border-slate-300 text-slate-700 text-sm font-semibold rounded-lg px-4 py-2 outline-none cursor-pointer shadow-sm">${reportWeekOptionsHtml}</select>
+                            </div>
+                        </div>
+                        <div class="overflow-x-auto custom-scrollbar pb-2">
+                            <table class="w-full text-left border-collapse min-w-[700px]">
+                                <thead>
+                                    <tr class="bg-slate-50 text-slate-600 text-xs uppercase tracking-wider border-b border-slate-200">
+                                        <th class="p-3 rounded-tl-lg">Día</th>
+                                        <th class="p-3 text-center text-blue-700 bg-blue-50/50">Total Pedidos</th>
+                                        <th class="p-3 text-center">Faltaron</th>
+                                        <th class="p-3 text-center border-l border-slate-200">En Escuela</th>
+                                        <th class="p-3 text-center border-r border-slate-200">En Casa</th>
+                                        <th class="p-3 text-center text-emerald-700 bg-emerald-50/50">Pagado</th>
+                                        <th class="p-3 text-center text-amber-700 bg-amber-50/50">Fiado</th>
+                                        <th class="p-3 text-center text-purple-700 bg-purple-50/50 rounded-tr-lg">Beca</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="text-sm">${reportRowsHtml}</tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div class="bg-indigo-50 p-6 rounded-2xl border border-indigo-200 shadow-sm">
+                        <div class="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-4">
+                            <div>
+                                <h4 class="font-bold text-indigo-900 flex items-center gap-2 text-xl"><i data-lucide="list-collapse" class="w-6 h-6 text-indigo-600"></i> Gestor General de Pedidos</h4>
+                                <p class="text-sm text-indigo-700 mt-1">Busca, edita o elimina los pedidos de cualquier grado realizados en la semana mostrada en el Reporte superior.</p>
+                            </div>
+                        </div>
+
+                        <div class="flex flex-col md:flex-row gap-4 mb-4 bg-white/60 p-3 rounded-xl border border-indigo-100">
+                            <div class="flex flex-wrap gap-2 items-center">
+                                <span class="text-sm font-semibold text-slate-500 mx-2 hidden sm:block">Día:</span>
+                                ${adminDaysHtml}
+                            </div>
+                            <div class="flex flex-wrap gap-2 items-center md:border-l border-slate-200 md:pl-4">
+                                <span class="text-sm font-semibold text-slate-500 mx-2 hidden sm:block">Grado:</span>
+                                <select onchange="window.app.setAdminOrderGrade(this.value)" class="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 appearance-none font-medium">
+                                    ${adminGradesOptionsHtml}
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="space-y-2 max-h-96 overflow-y-auto custom-scrollbar pr-2">
+                            ${adminOrdersHtml}
+                        </div>
+                    </div>
+
+                    <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                        <h4 class="font-semibold text-slate-800 mb-6 flex items-center gap-2 text-xl">
+                            <i data-lucide="shield-check" class="w-6 h-6 text-slate-500"></i> Configuración General y Accesos
+                        </h4>
+                        
+                        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                            <div>
+                                <h5 class="text-xs font-bold text-slate-500 mb-3 uppercase tracking-wider border-b border-slate-100 pb-2">Contacto de Ventas (Para Padres)</h5>
+                                <form onsubmit="window.app.saveContactInfo(event)" class="space-y-4">
+                                    <div>
+                                        <label class="block text-sm font-semibold text-slate-700 mb-1">Nombre del Responsable</label>
+                                        <input type="text" id="contact-name" value="${state.adminData.contactInfo.name || ''}" placeholder="Ej. Patricia Corona" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 outline-none focus:border-blue-500 transition-all text-slate-700">
+                                    </div>
+                                    <div>
+                                        <label class="block text-sm font-semibold text-slate-700 mb-1">Teléfono</label>
+                                        <input type="text" id="contact-phone" value="${state.adminData.contactInfo.phone || ''}" placeholder="Ej. 555-123-4567" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 outline-none focus:border-blue-500 transition-all text-slate-700">
+                                    </div>
+                                    <div class="text-right pt-2">
+                                        <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg text-sm font-semibold transition-colors shadow-sm">Guardar Contacto</button>
+                                    </div>
+                                </form>
+                            </div>
+
+                            <div>
+                                <h5 class="text-xs font-bold text-slate-500 mb-3 uppercase tracking-wider border-b border-slate-100 pb-2">Contraseñas del Personal</h5>
+                                <p class="text-[11px] text-slate-400 mb-3 leading-tight">Si lo dejas en blanco, no se pedirá contraseña para esa sección.</p>
+                                <form onsubmit="window.app.savePasswords(event)" class="space-y-4">
+                                    <div><label class="block text-sm font-semibold text-slate-700 mb-1">Administración</label><input type="text" id="pwd-admin" value="${state.adminData.passwords.admin || ''}" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 outline-none focus:border-slate-500"></div>
+                                    <div><label class="block text-sm font-semibold text-slate-700 mb-1">Cocina</label><input type="text" id="pwd-cocina" value="${state.adminData.passwords.cocina || ''}" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 outline-none focus:border-slate-500"></div>
+                                    <div><label class="block text-sm font-semibold text-slate-700 mb-1">Gestión Escolar</label><input type="text" id="pwd-escuela" value="${state.adminData.passwords.escuela || ''}" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 outline-none focus:border-slate-500"></div>
+                                    <div class="text-right pt-2"><button type="submit" class="bg-slate-800 hover:bg-slate-900 text-white px-5 py-2 rounded-lg text-sm font-semibold transition-colors shadow-sm">Guardar Claves</button></div>
+                                </form>
+                            </div>
+
+                            ${scheduleHtml}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Modal Editar Alumno
+        function renderEditStudentModal() {
+            if (!state.editingStudent) return '';
+            return `
+                <div class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 fade-in">
+                    <div class="bg-white rounded-2xl p-6 w-full max-w-md shadow-2xl">
+                        <div class="flex justify-between items-center mb-6">
+                            <h3 class="text-xl font-bold text-slate-900 flex items-center gap-2"><i data-lucide="user-cog" class="w-6 h-6 text-blue-600"></i> Editar Alumno</h3>
+                            <button onclick="window.app.closeEditStudentModal()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x" class="w-5 h-5"></i></button>
+                        </div>
+                        <form onsubmit="window.app.saveEditedStudent(event)" class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-semibold text-slate-700 mb-1">Nombre Completo</label>
+                                <input type="text" id="edit-stu-name" value="${state.editingStudent.name}" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 outline-none focus:border-blue-500" required>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-semibold text-slate-700 mb-1">CURP</label>
+                                <input type="text" id="edit-stu-curp" value="${state.editingStudent.curp}" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 outline-none focus:border-blue-500 font-mono text-sm uppercase">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-semibold text-slate-700 mb-1">Contraseña (Casa)</label>
+                                <input type="text" id="edit-stu-pwd" value="${state.editingStudent.password}" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 outline-none focus:border-blue-500 font-mono text-sm" required>
+                            </div>
+                            <div class="pt-4 border-t border-slate-100 flex gap-3">
+                                <button type="button" onclick="window.app.closeEditStudentModal()" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 py-2.5 rounded-xl font-semibold transition-colors">Cancelar</button>
+                                <button type="submit" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-xl font-semibold transition-colors">Guardar Cambios</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            `;
+        }
+
+        window.app = {
+            checkHomeOrderSchedule: () => {
+                const sched = state.adminData?.settings?.homeOrderSchedule;
+                if (!sched || sched.mode === 'always') return { open: true };
+
+                const now = new Date();
+                const day = now.getDay();
+                if (!sched.days.includes(day)) {
+                    const daysMap = {0:'Domingo', 1:'Lunes', 2:'Martes', 3:'Miércoles', 4:'Jueves', 5:'Viernes', 6:'Sábado'};
+                    const activeDaysNames = sched.days.map(d => daysMap[d]).join(', ');
+                    return { open: false, reason: `Días de servicio permitidos: ${activeDaysNames || 'Ninguno'}.` };
+                }
+
+                const currentStr = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
+                if (currentStr >= sched.start && currentStr <= sched.end) {
+                    return { open: true };
+                }
+                
+                const formatTime = (timeStr) => {
+                    if(!timeStr) return '';
+                    let [h, m] = timeStr.split(':'); 
+                    h = parseInt(h); 
+                    const ampm = h >= 12 ? 'p.m.' : 'a.m.'; 
+                    h = h % 12 || 12; 
+                    return `${h}:${m} ${ampm}`;
+                };
+
+                return { open: false, reason: `El horario de atención para pedidos es de ${formatTime(sched.start)} a ${formatTime(sched.end)}.` };
+            },
+
+            updateScheduleMode: (mode) => {
+                if(!state.adminData.settings) state.adminData.settings = { homeOrderSchedule: { mode: 'always', days: [1,2,3,4,5], start: '07:00', end: '16:00' } };
+                state.adminData.settings.homeOrderSchedule.mode = mode;
+                const fullData = getFullLocalData(); fullData.adminData = state.adminData; saveFullLocalData(fullData);
+                renderView();
+            },
+
+            toggleScheduleDay: (day) => {
+                if(!state.adminData.settings) return;
+                let days = state.adminData.settings.homeOrderSchedule.days;
+                if (days.includes(day)) { days = days.filter(d => d !== day); } else { days.push(day); }
+                state.adminData.settings.homeOrderSchedule.days = days;
+                const fullData = getFullLocalData(); fullData.adminData = state.adminData; saveFullLocalData(fullData);
+            },
+
+            saveScheduleTime: () => {
+                if(!state.adminData.settings) return;
+                state.adminData.settings.homeOrderSchedule.start = document.getElementById('sched_start').value;
+                state.adminData.settings.homeOrderSchedule.end = document.getElementById('sched_end').value;
+                const fullData = getFullLocalData(); fullData.adminData = state.adminData; saveFullLocalData(fullData);
+            },
+
+            requestAccess: (targetView) => {
+                if(targetView !== 'home' && targetView !== 'casa') {
+                    const requiredPwd = state.adminData.passwords[targetView];
+                    if (requiredPwd && requiredPwd.trim() !== '') {
+                        const userPwd = prompt(`Ingresa la contraseña para acceder a esta sección:`);
+                        if (userPwd === null) return; 
+                        if (userPwd !== requiredPwd) {
+                            alert("Contraseña incorrecta.");
+                            return;
+                        }
+                    }
+                }
+                window.app.setView(targetView);
+            },
+
+            setView: (view) => {
+                state.view = view;
+                state.formSelection.grade = ''; 
+                renderView();
+            },
+            
+            loginCasa: (e) => {
+                e.preventDefault();
+                const pwd = document.getElementById('casa-login-pwd').value.trim();
+                let foundStudent = null;
+                let foundGrade = null;
+                
+                for (let grade in state.adminData.students) {
+                    const stu = state.adminData.students[grade].find(s => s.password === pwd && pwd !== '');
+                    if (stu) {
+                        foundStudent = stu;
+                        foundGrade = grade;
+                        break;
+                    }
+                }
+
+                if (foundStudent) {
+                    if (foundStudent.isBlocked) {
+                        alert('🚫 Tu acceso para pedidos desde casa está suspendido temporalmente. Los pedidos ahora solo se pueden realizar directamente en la escuela.');
+                        return;
+                    }
+                    state.loggedStudent = { ...foundStudent, grade: foundGrade };
+                    state.formSelection.grade = foundGrade;
+                    renderView();
+                } else {
+                    alert('Clave incorrecta o alumno no encontrado. Verifica los 10 dígitos o pide al maestro que actualice la contraseña.');
+                }
+            },
+            
+            logoutCasa: () => {
+                state.loggedStudent = null;
+                renderView();
+            },
+
+            setSchoolTab: (tab) => { state.schoolTab = tab; renderView(); },
+            setKitchenDay: (day) => { state.kitchenDay = day; state.kitchenSelectedDelivered = []; renderView(); },
+            setKitchenTab: (tab) => { state.kitchenTab = tab; state.kitchenSelectedDelivered = []; renderView(); },
+            setKitchenGradeFilter: (grade) => { state.kitchenGradeFilter = grade; state.kitchenSelectedDelivered = []; renderView(); },
+            setMenuDay: (day) => { state.menuConfigDay = day; renderView(); },
+            
+            setReportCycle: (cycleId) => { 
+                state.reportCycleId = cycleId; 
+                const cycle = state.cycles.find(c => c.id === cycleId);
+                state.reportWeekId = cycle && cycle.weeks.length > 0 ? cycle.weeks[0].id : null;
+                renderView(); 
+            },
+            setReportWeek: (weekId) => { state.reportWeekId = weekId; renderView(); },
+            setAdminOrderDay: (day) => { state.adminOrderDay = day; renderView(); },
+            setAdminOrderGrade: (grade) => { state.adminOrderGrade = grade; renderView(); },
+
+            setManagingCycle: (cycleId) => {
+                state.managingCycleId = cycleId;
+                const targetCycle = getManagingCycle();
+                state.managingWeekId = targetCycle.activeWeekId || (targetCycle.weeks.length > 0 ? targetCycle.weeks[0].id : null);
+                const targetWeek = getManagingWeek();
+                state.draftMenu = targetWeek ? JSON.parse(JSON.stringify(targetWeek.menu || MENU_POR_DEFECTO)) : JSON.parse(JSON.stringify(MENU_POR_DEFECTO));
+                state.draftInactiveDays = targetWeek ? [...(targetWeek.inactiveDays || [])] : [];
+                state.formSelection.grade = ''; 
+                renderView();
+            },
+
+            createNewCycle: () => {
+                const name = prompt("Ingresa el nombre del nuevo Ciclo Escolar (ej. Ciclo 2026-2027):");
+                if (!name || name.trim() === '') return;
+                const fullData = getFullLocalData();
+                const newCycle = { id: 'cycle_' + Date.now(), name: name.trim(), weeks: [], activeWeekId: null };
+                fullData.cycles.push(newCycle);
+                saveFullLocalData(fullData); loadLocalData();
+                state.managingCycleId = newCycle.id;
+                state.managingWeekId = null;
+                state.draftMenu = JSON.parse(JSON.stringify(MENU_POR_DEFECTO));
+                state.draftInactiveDays = [];
+                alert(`¡Ciclo "${newCycle.name}" creado exitosamente! Crea una nueva semana para empezar a trabajar.`);
+                renderView();
+            },
+
+            editManagingCycle: () => {
+                const cycle = state.cycles.find(c => c.id === state.managingCycleId);
+                if(!cycle) return;
+                const newName = prompt("Editar nombre del ciclo:", cycle.name);
+                if(newName && newName.trim() !== '' && newName.trim() !== cycle.name) {
+                    const fullData = getFullLocalData();
+                    const target = fullData.cycles.find(c => c.id === state.managingCycleId);
+                    if(target) { target.name = newName.trim(); saveFullLocalData(fullData); loadLocalData(); renderView(); }
+                }
+            },
+
+            deleteManagingCycle: () => {
+                if(state.cycles.length <= 1) { alert("No puedes eliminar el único ciclo disponible."); return; }
+                if(!confirm("¿Estás seguro de eliminar este ciclo y TODAS sus semanas y pedidos? Esta acción no se puede deshacer.")) return;
+                const fullData = getFullLocalData();
+                fullData.cycles = fullData.cycles.filter(c => c.id !== state.managingCycleId);
+                if(state.activeCycleId === state.managingCycleId) { fullData.activeCycleId = fullData.cycles[0].id; }
+                saveFullLocalData(fullData); loadLocalData();
+                state.managingCycleId = state.cycles[0].id;
+                window.app.setManagingCycle(state.managingCycleId);
+            },
+
+            makeCycleActive: (cycleId) => {
+                if(!confirm("¿Deseas establecer este Ciclo como el activo?")) return;
+                const fullData = getFullLocalData();
+                fullData.activeCycleId = cycleId;
+                saveFullLocalData(fullData); loadLocalData(); renderView();
+            },
+
+            setManagingWeek: (weekId) => {
+                state.managingWeekId = weekId;
+                const targetWeek = getManagingWeek();
+                state.draftMenu = JSON.parse(JSON.stringify(targetWeek.menu || MENU_POR_DEFECTO));
+                state.draftInactiveDays = [...(targetWeek.inactiveDays || [])];
+                state.formSelection.grade = ''; 
+                renderView();
+            },
+            
+            editManagingWeek: () => {
+                const cycle = getManagingCycle();
+                if(!cycle) return;
+                const week = cycle.weeks.find(w => w.id === state.managingWeekId);
+                if(!week) return;
+                const newName = prompt("Editar nombre/fecha de la semana:", week.range);
+                if(newName && newName.trim() !== '' && newName.trim() !== week.range) {
+                    const fullData = getFullLocalData();
+                    const targetCycle = fullData.cycles.find(c => c.id === state.managingCycleId);
+                    const target = targetCycle.weeks.find(w => w.id === state.managingWeekId);
+                    if(target) { target.range = newName.trim(); saveFullLocalData(fullData); loadLocalData(); renderView(); }
+                }
+            },
+            
+            deleteManagingWeek: () => {
+                const cycle = getManagingCycle();
+                if(!cycle || cycle.weeks.length <= 1) { alert("No puedes eliminar la única semana de este ciclo."); return; }
+                if(!confirm("¿Estás seguro de eliminar esta semana y TODOS sus pedidos?")) return;
+                const fullData = getFullLocalData();
+                const targetCycle = fullData.cycles.find(c => c.id === state.managingCycleId);
+                targetCycle.weeks = targetCycle.weeks.filter(w => w.id !== state.managingWeekId);
+                if(targetCycle.activeWeekId === state.managingWeekId) targetCycle.activeWeekId = targetCycle.weeks[0].id;
+                saveFullLocalData(fullData); loadLocalData();
+                state.managingWeekId = state.cycles.find(c => c.id === state.managingCycleId).weeks[0].id;
+                const targetWeek = getManagingWeek();
+                state.draftMenu = JSON.parse(JSON.stringify(targetWeek.menu || MENU_POR_DEFECTO));
+                renderView();
+            },
+
+            createNewWeek: () => {
+                const range = prompt("Ingresa la fecha de la nueva semana (ej. del 13 al 17 de julio):");
+                if (range === null || range.trim() === '') return;
+                const fullData = getFullLocalData();
+                const targetCycle = fullData.cycles.find(c => c.id === state.managingCycleId);
+                if (!targetCycle) return;
+                
+                const newWeek = { id: 'week_' + Date.now(), range: range.trim(), menu: MENU_POR_DEFECTO, orders: [], inactiveDays: [], status: 'planned' };
+                targetCycle.weeks.push(newWeek); 
+                saveFullLocalData(fullData); loadLocalData();
+                state.managingWeekId = newWeek.id; 
+                state.draftMenu = JSON.parse(JSON.stringify(newWeek.menu));
+                state.draftInactiveDays = [];
+                alert(`¡Semana "${newWeek.range}" creada exitosamente!`); renderView();
+            },
+
+            makeWeekActive: (weekId) => {
+                if(!confirm("¿Deseas activar esta semana? Publicará este menú a los padres y reiniciará el monitor de la cocina.")) return;
+                const fullData = getFullLocalData();
+                const cycle = fullData.cycles.find(c => c.id === state.managingCycleId);
+                
+                if (fullData.activeCycleId !== cycle.id) {
+                    if(!confirm("Este ciclo no es el activo actualmente. ¿Deseas hacer que todo el ciclo se vuelva activo también?")) return;
+                    fullData.activeCycleId = cycle.id;
+                }
+
+                const currentActive = cycle.weeks.find(w => w.id === cycle.activeWeekId);
+                if (currentActive) {
+                    currentActive.status = 'archived';
+                    currentActive.summaryData = { total: currentActive.orders.length, delivered: currentActive.orders.filter(o=>o.status==='entregado').length, pending: currentActive.orders.filter(o=>o.status==='pendiente').length };
+                }
+                const targetWeek = cycle.weeks.find(w => w.id === weekId);
+                if (targetWeek) { targetWeek.status = 'active'; cycle.activeWeekId = weekId; }
+                saveFullLocalData(fullData); loadLocalData(); renderView();
+            },
+
+            toggleInactiveDay: (day, isInactive) => {
+                if (isInactive) {
+                    if (!state.draftInactiveDays.includes(day)) state.draftInactiveDays.push(day);
+                } else {
+                    state.draftInactiveDays = state.draftInactiveDays.filter(d => d !== day);
+                }
+                renderView();
+            },
+
+            toggleFood: (food) => {
+                const dayFoods = state.draftMenu[state.menuConfigDay] || [];
+                if (dayFoods.includes(food)) state.draftMenu[state.menuConfigDay] = dayFoods.filter(f => f !== food);
+                else state.draftMenu[state.menuConfigDay].push(food);
+                renderView();
+            },
+
+            saveMenu: () => {
+                const fullData = getFullLocalData();
+                const cycle = fullData.cycles.find(c => c.id === state.managingCycleId);
+                const targetWeek = cycle?.weeks.find(w => w.id === state.managingWeekId);
+                if (targetWeek) {
+                    targetWeek.menu = state.draftMenu; 
+                    targetWeek.inactiveDays = state.draftInactiveDays;
+                    saveFullLocalData(fullData); loadLocalData();
+                    alert("¡Menú de la semana actualizado!"); renderView();
+                }
+            },
+
+            getPaymentBadge: (status) => {
+                switch(status) {
+                    case 'Pagado': return '<span class="text-emerald-700 bg-emerald-100/80 border border-emerald-200 px-2 py-0.5 rounded text-xs font-bold w-fit">Pagado</span>';
+                    case 'Fiado': return '<span class="text-amber-700 bg-amber-100/80 border border-amber-200 px-2 py-0.5 rounded text-xs font-bold w-fit">Fiado</span>';
+                    case 'Beca': return '<span class="text-purple-700 bg-purple-100/80 border border-purple-200 px-2 py-0.5 rounded text-xs font-bold w-fit">Beca</span>';
+                    case 'Casa': return '<span class="text-sky-700 bg-sky-100/80 border border-sky-200 px-2 py-0.5 rounded text-xs font-bold w-fit">Casa</span>';
+                    default: return `<span class="text-slate-700 bg-slate-100 border border-slate-200 px-2 py-0.5 rounded text-xs font-bold w-fit">${status || 'Pagado'}</span>`;
+                }
+            },
+
+            updateOrderFormUI: (source) => {
+                const day = state.formSelection.day;
+                const grade = source === 'Casa' ? state.loggedStudent.grade : state.formSelection.grade;
+                const targetWeek = source === 'Escuela' ? getManagingWeek() : getActiveWeek();
+                if(!targetWeek) return;
+                
+                const allOrders = targetWeek.orders || [];
+                const gradeOrders = allOrders.filter(o => o.dayFor === day && o.grade === grade);
+                const summaryContainer = document.getElementById('order-summary');
+                const submitBtn = document.getElementById('btn-submit');
+                
+                if (source === 'Casa' && state.loggedStudent) {
+                    const studentOrders = gradeOrders.filter(o => o.studentName === state.loggedStudent.name);
+                    if (summaryContainer) {
+                        if (studentOrders.length > 0) {
+                            let summaryHtml = `
+                                <div class="bg-amber-50 p-5 rounded-2xl border border-amber-200 text-sm shadow-sm">
+                                    <h4 class="font-bold text-amber-900 mb-3 border-b border-amber-200 pb-2 flex items-center gap-2">
+                                        <i data-lucide="clipboard-list" class="w-5 h-5"></i> Pedido Registrado - ${day}
+                                    </h4>
+                                    <div class="space-y-2">
+                            `;
+                            studentOrders.forEach(o => {
+                                summaryHtml += `
+                                        <div class="flex justify-between items-center text-amber-900 bg-white/70 p-2.5 rounded-lg border border-amber-100 shadow-sm transition-all">
+                                            <div class="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 flex-wrap">
+                                                <span class="font-semibold">${o.studentName}</span> 
+                                                <span class="text-amber-700 bg-amber-100/50 px-2 py-0.5 rounded text-xs font-medium w-fit">${o.breakfastType}</span>
+                                                ${window.app.getPaymentBadge(o.paymentStatus)}
+                                            </div>
+                                        </div>`;
+                            });
+                            summaryHtml += `</div></div>`;
+                            summaryContainer.innerHTML = summaryHtml;
+                            summaryContainer.classList.remove('hidden');
+                            if(submitBtn) submitBtn.style.display = 'none';
+                        } else {
+                            summaryContainer.innerHTML = '';
+                            summaryContainer.classList.add('hidden');
+                            if(submitBtn) submitBtn.style.display = 'flex';
+                        }
+                        if (window.lucide) lucide.createIcons();
+                    }
+                    return; 
+                }
+
+                const studentSelect = document.getElementById('form-student');
+                if (!studentSelect) return; 
+
+                if (grade) {
+                    const orderedStudentNames = gradeOrders.map(o => o.studentName);
+                    const allStudents = state.adminData.students[grade] || [];
+                    const availableStudents = allStudents.filter(s => !orderedStudentNames.includes(s.name));
+
+                    const currentSelected = studentSelect.value;
+                    let optionsHtml = '<option value="">Selecciona al alumno...</option>';
+                    
+                    if (allStudents.length === 0) {
+                        optionsHtml = '<option value="">Grado sin alumnos configurados</option>';
+                        studentSelect.disabled = true;
+                    } else if (availableStudents.length === 0) {
+                        optionsHtml = '<option value="">Todos los alumnos han pedido</option>';
+                        studentSelect.disabled = true;
+                    } else {
+                        availableStudents.forEach(s => {
+                            optionsHtml += `<option value="${s.name}" ${currentSelected === s.name ? 'selected' : ''}>${s.name}</option>`;
+                        });
+                        studentSelect.disabled = false;
+                    }
+                    studentSelect.innerHTML = optionsHtml;
+
+                    if (summaryContainer) {
+                        let summaryHtml = `
+                            <div class="bg-blue-50 p-5 rounded-2xl border border-blue-200 text-sm shadow-sm">
+                                <h4 class="font-bold text-blue-900 mb-3 border-b border-blue-200 pb-2 flex items-center gap-2">
+                                    <i data-lucide="clipboard-list" class="w-5 h-5"></i> Resumen de Pedidos - ${grade} (${day})
+                                </h4>
+                                <div class="max-h-56 overflow-y-auto custom-scrollbar mb-3 pr-2 space-y-2">
+                        `;
+                        
+                        if (gradeOrders.length === 0) {
+                            summaryHtml += `<p class="text-blue-600/70 italic text-center py-2">No hay pedidos registrados aún para este grupo.</p>`;
+                        } else {
+                            gradeOrders.forEach(o => {
+                                summaryHtml += `
+                                    <div class="flex justify-between items-center text-blue-900 bg-white/70 p-2.5 rounded-lg border border-blue-100 shadow-sm transition-all hover:border-blue-300">
+                                        <div class="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 flex-wrap">
+                                            <span class="font-semibold">${o.studentName}</span> 
+                                            <span class="text-blue-700 bg-blue-100/50 px-2 py-0.5 rounded text-xs font-medium w-fit">${o.breakfastType}</span>
+                                            ${window.app.getPaymentBadge(o.paymentStatus)}
+                                        </div>
+                                        <div class="flex items-center gap-1 ml-2 flex-shrink-0">
+                                            <button type="button" onclick="window.app.editOrder('${o.id}', '${source}')" class="text-blue-500 hover:bg-blue-100 p-1.5 rounded-md transition-colors" title="Editar Pedido">
+                                                <i data-lucide="pencil" class="w-4 h-4"></i>
+                                            </button>
+                                            <button type="button" onclick="window.app.deleteOrder('${o.id}', '${source}')" class="text-red-500 hover:bg-red-100 p-1.5 rounded-md transition-colors" title="Eliminar Pedido">
+                                                <i data-lucide="trash-2" class="w-4 h-4"></i>
+                                            </button>
+                                        </div>
+                                    </div>`;
+                            });
+                        }
+                        summaryHtml += `
+                                </div>
+                                <div class="flex justify-between items-center text-blue-900 font-bold border-t border-blue-200 pt-3 mt-2">
+                                    <span class="flex items-center gap-1.5"><i data-lucide="check-circle-2" class="w-5 h-5 text-emerald-500"></i> Total pedidos: ${gradeOrders.length}</span>
+                                    <span class="flex items-center gap-1.5"><i data-lucide="clock" class="w-5 h-5 text-amber-500"></i> Sin pedir: ${availableStudents.length}</span>
+                                </div>
+                            </div>
+                        `;
+                        summaryContainer.innerHTML = summaryHtml;
+                        summaryContainer.classList.remove('hidden');
+                        if (window.lucide) lucide.createIcons();
+                    }
+                } else {
+                    studentSelect.innerHTML = '<option value="">Primero elige un grado</option>';
+                    studentSelect.disabled = true;
+                    if (summaryContainer) {
+                        summaryContainer.innerHTML = '';
+                        summaryContainer.classList.add('hidden');
+                    }
+                }
+            },
+
+            editOrder: (orderId, source) => {
+                const fullData = getFullLocalData();
+                const cycleId = source === 'Escuela' ? state.managingCycleId : (source === 'Admin' ? state.reportCycleId : state.activeCycleId);
+                const weekId = source === 'Escuela' ? state.managingWeekId : (source === 'Admin' ? state.reportWeekId : getActiveWeek()?.id); 
+                const cycle = fullData.cycles.find(c => c.id === cycleId);
+                const week = cycle?.weeks.find(w => w.id === weekId);
+                
+                if (week) {
+                    const orderIndex = week.orders.findIndex(o => o.id === orderId);
+                    if(orderIndex > -1) {
+                        const o = week.orders[orderIndex];
+                        
+                        state.formSelection.day = o.dayFor;
+                        state.formSelection.grade = o.grade;
+                        state.formSelection.payment = o.paymentStatus || 'Pagado';
+                        
+                        week.orders.splice(orderIndex, 1);
+                        saveFullLocalData(fullData);
+                        loadLocalData();
+
+                        if (source === 'Admin') {
+                            state.view = 'escuela';
+                            state.schoolTab = 'pedidos';
+                            state.managingCycleId = cycleId;
+                            state.managingWeekId = weekId;
+                        }
+
+                        renderView(); 
+                        alert(`El pedido de ${o.studentName} ha sido devuelto al formulario de Escuela para su edición.`);
+                        
+                        setTimeout(() => {
+                            const studentSelect = document.getElementById('form-student');
+                            if(studentSelect) studentSelect.value = o.studentName;
+                            
+                            const fRadios = document.getElementsByName('foodSelection');
+                            for(let r of fRadios) { if(o.breakfastType.includes(r.value)) { r.checked = true; window.app.selectFood(r); } }
+                            const dRadios = document.getElementsByName('drinkSelection');
+                            for(let r of dRadios) { if(o.breakfastType.includes(r.value)) { r.checked = true; window.app.selectFood(r); } }
+                        }, 100);
+                    }
+                }
+            },
+
+            deleteOrder: (orderId, source) => {
+                if(!confirm("¿Estás seguro de que deseas eliminar este pedido por completo?")) return;
+                const fullData = getFullLocalData();
+                const cycleId = source === 'Escuela' ? state.managingCycleId : (source === 'Admin' ? state.reportCycleId : state.activeCycleId);
+                const weekId = source === 'Escuela' ? state.managingWeekId : (source === 'Admin' ? state.reportWeekId : getActiveWeek()?.id); 
+                const cycle = fullData.cycles.find(c => c.id === cycleId);
+                const week = cycle?.weeks.find(w => w.id === weekId);
+
+                if (week) {
+                    week.orders = week.orders.filter(o => o.id !== orderId);
+                    saveFullLocalData(fullData); loadLocalData(); renderView();
+                }
+            },
+
+            updateFormDay: (day, source) => {
+                state.formSelection.day = day;
+                renderView(); 
+            },
+
+            onGradeChange: (grade, source) => {
+                state.formSelection.grade = grade;
+                document.querySelectorAll('.grade-btn').forEach(btn => {
+                    if(btn.dataset.grade === grade) btn.className = 'grade-btn px-4 py-2 rounded-lg text-sm font-bold border transition-colors bg-indigo-50 border-indigo-300 text-indigo-700 shadow-sm';
+                    else btn.className = 'grade-btn px-4 py-2 rounded-lg text-sm font-bold border transition-colors bg-white border-slate-200 text-slate-600 hover:bg-slate-50';
+                });
+                window.app.updateOrderFormUI(source);
+            },
+
+            setPaymentStatus: (status) => {
+                state.formSelection.payment = status;
+                document.querySelectorAll('.payment-btn').forEach(btn => {
+                    if(btn.dataset.status === status) btn.className = 'payment-btn px-4 py-2 rounded-lg text-sm font-bold border transition-colors bg-emerald-50 border-emerald-300 text-emerald-700 shadow-sm';
+                    else btn.className = 'payment-btn px-4 py-2 rounded-lg text-sm font-bold border transition-colors bg-white border-slate-200 text-slate-600 hover:bg-slate-50';
+                });
+            },
+
+            selectFood: (radioBtn) => {
+                document.querySelectorAll(`input[name="${radioBtn.name}"]`).forEach(el => {
+                    el.parentElement.classList.remove('border-blue-500', 'bg-blue-50');
+                    el.parentElement.classList.add('border-slate-200');
+                });
+                radioBtn.parentElement.classList.remove('border-slate-200');
+                radioBtn.parentElement.classList.add('border-blue-500', 'bg-blue-50');
+                document.getElementById('btn-submit').disabled = false;
+            },
+
+            submitOrder: (e, source) => {
+                e.preventDefault();
+
+                const dayFor = document.getElementById('form-day').value;
+                const grade = source === 'Casa' ? state.loggedStudent.grade : state.formSelection.grade;
+                const studentName = source === 'Casa' ? state.loggedStudent.name : document.getElementById('form-student').value;
+                
+                const foodRadio = document.querySelector('input[name="foodSelection"]:checked');
+                const drinkRadio = document.querySelector('input[name="drinkSelection"]:checked');
+                const paymentStatus = source === 'Casa' ? 'Casa' : (state.formSelection.payment || 'Pagado');
+                
+                const fullData = getFullLocalData();
+                const targetCycleId = source === 'Escuela' ? state.managingCycleId : state.activeCycleId;
+                const targetWeekId = source === 'Escuela' ? state.managingWeekId : getActiveWeek()?.id; 
+                const targetCycle = fullData.cycles.find(c => c.id === targetCycleId);
+                const targetWeek = targetCycle?.weeks.find(w => w.id === targetWeekId);
+
+                if (targetWeek && targetWeek.inactiveDays && targetWeek.inactiveDays.includes(dayFor)) {
+                    alert("No se pueden realizar pedidos en un día inhábil.");
+                    return;
+                }
+                
+                if (!grade || !studentName || (!foodRadio && !drinkRadio)) {
+                    alert("Por favor completa los datos y selecciona al menos un alimento o bebida.");
+                    return;
+                }
+
+                const breakfastType = [foodRadio?.value, drinkRadio?.value].filter(Boolean).join(' + ');
+
+                const orderData = {
+                    id: 'ord_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+                    source, dayFor, grade, studentName,
+                    breakfastType: breakfastType, paymentStatus: paymentStatus, 
+                    status: 'pendiente', timestamp: Date.now()
+                };
+
+                if (targetWeek) {
+                    targetWeek.orders.push(orderData);
+                    saveFullLocalData(fullData); loadLocalData();
+                    state.formSelection.grade = source === 'Casa' ? '' : grade; 
+                    state.formSelection.payment = 'Pagado';
+                    alert("¡Pedido guardado con éxito!");
+                    renderView();
+                } else {
+                    alert("Error interno: No se pudo localizar la semana activa para guardar el pedido.");
+                }
+            },
+
+            completeOrder: (orderId) => {
+                const fullData = getFullLocalData();
+                const cycle = fullData.cycles.find(c => c.id === fullData.activeCycleId);
+                const activeWeek = cycle?.weeks.find(w => w.id === cycle.activeWeekId);
+                if (activeWeek) {
+                    const orderIndex = activeWeek.orders.findIndex(o => o.id === orderId);
+                    if (orderIndex > -1) {
+                        activeWeek.orders[orderIndex].status = 'entregado';
+                        activeWeek.orders[orderIndex].completedAt = Date.now();
+                        saveFullLocalData(fullData); loadLocalData(); renderView();
+                    }
+                }
+            },
+
+            undoOrder: (orderId) => {
+                const fullData = getFullLocalData();
+                const cycle = fullData.cycles.find(c => c.id === fullData.activeCycleId);
+                const activeWeek = cycle?.weeks.find(w => w.id === cycle.activeWeekId);
+                if (activeWeek) {
+                    const orderIndex = activeWeek.orders.findIndex(o => o.id === orderId);
+                    if (orderIndex > -1) {
+                        activeWeek.orders[orderIndex].status = 'pendiente';
+                        activeWeek.orders[orderIndex].completedAt = null;
+                        
+                        const sIdx = state.kitchenSelectedDelivered.indexOf(orderId);
+                        if(sIdx > -1) state.kitchenSelectedDelivered.splice(sIdx, 1);
+
+                        saveFullLocalData(fullData); loadLocalData(); renderView();
+                    }
+                }
+            },
+
+            deleteOrderPermanently: (orderId) => {
+                if(!confirm("¿Eliminar este pedido definitivamente? No podrá ser recuperado.")) return;
+                const fullData = getFullLocalData();
+                const cycle = fullData.cycles.find(c => c.id === fullData.activeCycleId);
+                const activeWeek = cycle?.weeks.find(w => w.id === cycle.activeWeekId);
+                if (activeWeek) {
+                    activeWeek.orders = activeWeek.orders.filter(o => o.id !== orderId);
+                    const sIdx = state.kitchenSelectedDelivered.indexOf(orderId);
+                    if(sIdx > -1) state.kitchenSelectedDelivered.splice(sIdx, 1);
+                    saveFullLocalData(fullData); loadLocalData(); renderView();
+                }
+            },
+
+            toggleKitchenDelivered: (orderId) => {
+                const idx = state.kitchenSelectedDelivered.indexOf(orderId);
+                if(idx > -1) state.kitchenSelectedDelivered.splice(idx, 1);
+                else state.kitchenSelectedDelivered.push(orderId);
+                renderView();
+            },
+
+            toggleAllKitchenDelivered: (checked) => {
+                if(checked) {
+                    const activeWeek = getActiveWeek();
+                    if(activeWeek) {
+                        const entOrders = activeWeek.orders.filter(o => o.dayFor === state.kitchenDay && o.status === 'entregado');
+                        if (state.kitchenGradeFilter !== 'Todos') {
+                            state.kitchenSelectedDelivered = entOrders.filter(o => o.grade === state.kitchenGradeFilter).map(o => o.id);
+                        } else {
+                            state.kitchenSelectedDelivered = entOrders.map(o => o.id);
+                        }
+                    }
+                } else {
+                    state.kitchenSelectedDelivered = [];
+                }
+                renderView();
+            },
+
+            deleteSelectedKitchenDelivered: () => {
+                if(!confirm(`¿Eliminar definitivamente ${state.kitchenSelectedDelivered.length} pedido(s)? No podrán ser recuperados.`)) return;
+                const fullData = getFullLocalData();
+                const cycle = fullData.cycles.find(c => c.id === fullData.activeCycleId);
+                const activeWeek = cycle?.weeks.find(w => w.id === cycle.activeWeekId);
+                if (activeWeek) {
+                    activeWeek.orders = activeWeek.orders.filter(o => !state.kitchenSelectedDelivered.includes(o.id));
+                    saveFullLocalData(fullData); 
+                    state.kitchenSelectedDelivered = [];
+                    loadLocalData(); 
+                    renderView();
+                }
+            },
+
+            setSearch: (type, val) => {
+                if (type === 'student') state.adminStudentSearch = val;
+                else if (type === 'alimento') state.adminAlimentoSearch = val;
+                else if (type === 'bebida') state.adminBebidaSearch = val;
+                renderView();
+                setTimeout(() => {
+                    const input = document.querySelector(`input[placeholder="Buscar ${type}..."]`);
+                    if(input) { input.focus(); input.selectionStart = input.selectionEnd = input.value.length; }
+                }, 0);
+            },
+
+            adminSelectGrade: (grade) => {
+                state.adminSelectedGrade = grade;
+                state.adminSelectedStudents = []; 
+                state.adminStudentSearch = ''; 
+                renderView();
+            },
+            
+            setStudentAddMode: (mode) => {
+                state.adminStudentAddMode = mode;
+                renderView();
+            },
+
+            toggleAllStudents: (checked) => {
+                if (!state.adminSelectedGrade) return;
+                const students = state.adminData.students[state.adminSelectedGrade] || [];
+                const searchQuery = (state.adminStudentSearch || '').toLowerCase();
+                const filteredStudents = students.filter(s => s.name.toLowerCase().includes(searchQuery) || (s.curp && s.curp.toLowerCase().includes(searchQuery)));
+                
+                if (checked) {
+                    filteredStudents.forEach(s => {
+                        if (!state.adminSelectedStudents.includes(s.id)) state.adminSelectedStudents.push(s.id);
+                    });
+                } else {
+                    state.adminSelectedStudents = state.adminSelectedStudents.filter(id => !filteredStudents.find(s=>s.id === id));
+                }
+                renderView();
+            },
+
+            toggleStudentBlock: (studentId) => {
+                let found = false;
+                const fullData = getFullLocalData();
+                for (let g in state.adminData.students) {
+                    const idx = state.adminData.students[g].findIndex(s => s.id === studentId);
+                    if (idx > -1) {
+                        state.adminData.students[g][idx].isBlocked = !state.adminData.students[g][idx].isBlocked;
+                        found = true;
+                        break;
+                    }
+                }
+                if (found) {
+                    fullData.adminData = state.adminData;
+                    saveFullLocalData(fullData);
+                    renderView();
+                }
+            },
+
+            toggleStudentSelect: (studentId) => {
+                const idx = state.adminSelectedStudents.indexOf(studentId);
+                if (idx > -1) state.adminSelectedStudents.splice(idx, 1);
+                else state.adminSelectedStudents.push(studentId);
+                renderView();
+            },
+
+            deleteSelectedStudents: () => {
+                if (!confirm(`¿Estás seguro de eliminar ${state.adminSelectedStudents.length} alumno(s)?`)) return;
+                const fullData = getFullLocalData();
+                state.adminData.students[state.adminSelectedGrade] = state.adminData.students[state.adminSelectedGrade].filter(item => !state.adminSelectedStudents.includes(item.id));
+                fullData.adminData = state.adminData;
+                saveFullLocalData(fullData);
+                state.adminSelectedStudents = []; 
+                loadLocalData(); renderView();
+            },
+
+            openEditStudentModal: (studentId) => {
+                let found = null;
+                for(let g in state.adminData.students) {
+                    const s = state.adminData.students[g].find(x => x.id === studentId);
+                    if(s) { found = { ...s, grade: g }; break; }
+                }
+                if(found) {
+                    state.editingStudent = found;
+                    renderView();
+                }
+            },
+
+            closeEditStudentModal: () => {
+                state.editingStudent = null;
+                renderView();
+            },
+
+            saveEditedStudent: (e) => {
+                e.preventDefault();
+                if(!state.editingStudent) return;
+                
+                const newName = document.getElementById('edit-stu-name').value.trim();
+                const newCurp = document.getElementById('edit-stu-curp').value.trim().toUpperCase();
+                const newPwd = document.getElementById('edit-stu-pwd').value.trim();
+                
+                if(!newName || !newPwd) return alert("Nombre y contraseña son obligatorios.");
+                
+                const fullData = getFullLocalData();
+                const g = state.editingStudent.grade;
+                const idx = state.adminData.students[g].findIndex(x => x.id === state.editingStudent.id);
+                
+                if(idx > -1) {
+                    state.adminData.students[g][idx].name = newName;
+                    state.adminData.students[g][idx].curp = newCurp;
+                    state.adminData.students[g][idx].password = newPwd;
+                    
+                    fullData.adminData = state.adminData;
+                    saveFullLocalData(fullData);
+                    loadLocalData();
+                    state.editingStudent = null;
+                    renderView();
+                }
+            },
+
+            addAdminItem: (e, type) => {
+                e.preventDefault();
+                const fullData = getFullLocalData();
+                let needsSave = false;
+
+                if (type === 'grade') {
+                    const input = document.getElementById('new-grade-input');
+                    const val = input.value.trim();
+                    if (val && !state.adminData.grades.includes(val)) {
+                        state.adminData.grades.push(val);
+                        if (!state.adminData.students[val]) state.adminData.students[val] = [];
+                        needsSave = true;
+                    }
+                } 
+                else if (type === 'student') {
+                    const input = document.getElementById('new-student-input');
+                    const rawVal = input.value;
+                    const lines = rawVal.split(/[\n]+/).map(i => i.trim()).filter(i => i !== '');
+                    
+                    if (lines.length > 0 && state.adminSelectedGrade) {
+                        if (!state.adminData.students[state.adminSelectedGrade]) state.adminData.students[state.adminSelectedGrade] = [];
+                        
+                        lines.forEach(line => {
+                            const curpMatch = line.match(/^([A-Z0-9]{18})\s+(.*)$/i);
+                            let newStudent = null;
+
+                            if (curpMatch) {
+                                const curp = curpMatch[1].toUpperCase();
+                                const rest = curpMatch[2];
+                                let apPaterno = '', apMaterno = '', nombres = '';
+                                
+                                const slashIdx = rest.indexOf('/');
+                                const starIdx = rest.indexOf('*');
+                                
+                                if (slashIdx > -1 && starIdx > slashIdx) {
+                                    apPaterno = rest.substring(0, slashIdx).trim();
+                                    apMaterno = rest.substring(slashIdx + 1, starIdx).trim();
+                                    nombres = rest.substring(starIdx + 1).trim();
+                                    const fullName = `${nombres} ${apPaterno} ${apMaterno}`.trim().replace(/\s+/g, ' ');
+                                    
+                                    newStudent = {
+                                        id: 'stu_' + Date.now() + Math.random().toString(36).substr(2, 5),
+                                        name: fullName, curp: curp, password: curp.substring(0, 10), isBlocked: false
+                                    };
+                                } else {
+                                    newStudent = { id: 'stu_' + Date.now() + Math.random().toString(36).substr(2, 5), name: rest, curp: curp, password: curp.substring(0, 10), isBlocked: false };
+                                }
+                            } else {
+                                newStudent = { id: 'stu_' + Date.now() + Math.random().toString(36).substr(2, 5), name: line, curp: '', password: '', isBlocked: false };
+                            }
+                            
+                            state.adminData.students[state.adminSelectedGrade].push(newStudent);
+                            needsSave = true;
+                        });
+                    }
+                } 
+                else if (type === 'alimento' || type === 'bebida') {
+                    const inputId = type === 'alimento' ? 'new-alimento-input' : 'new-bebida-input';
+                    const input = document.getElementById(inputId);
+                    const rawVal = input.value;
+                    const items = rawVal.split(/[,;\n]+/).map(i => i.trim()).filter(i => i !== '');
+
+                    if (items.length > 0) {
+                        items.forEach(item => {
+                            if (type === 'alimento' && !state.adminData.alimentos.includes(item)) {
+                                state.adminData.alimentos.push(item); needsSave = true;
+                            } else if (type === 'bebida' && !state.adminData.bebidas.includes(item)) {
+                                state.adminData.bebidas.push(item); needsSave = true;
+                            }
+                        });
+                    }
+                }
+
+                if (needsSave) { fullData.adminData = state.adminData; saveFullLocalData(fullData); loadLocalData(); renderView(); }
+            },
+
+            addSingleStudent: (e) => {
+                e.preventDefault();
+                if(!state.adminSelectedGrade) return;
+
+                const name = document.getElementById('ind-nombre').value.trim();
+                const curp = document.getElementById('ind-curp').value.trim().toUpperCase();
+                const pwd = document.getElementById('ind-pwd').value.trim();
+
+                if(!name || !pwd) return;
+
+                const newStudent = { id: 'stu_' + Date.now() + Math.random().toString(36).substr(2, 5), name: name, curp: curp, password: pwd, isBlocked: false };
+
+                const fullData = getFullLocalData();
+                if (!state.adminData.students[state.adminSelectedGrade]) state.adminData.students[state.adminSelectedGrade] = [];
+                state.adminData.students[state.adminSelectedGrade].push(newStudent);
+                
+                fullData.adminData = state.adminData;
+                saveFullLocalData(fullData); loadLocalData(); renderView();
+            },
+
+            toggleAllCatalog: (catalogType, checked) => {
+                const isAlimentos = catalogType === 'alimentos';
+                const sourceArray = isAlimentos ? state.adminData.alimentos : state.adminData.bebidas;
+                const searchQuery = (isAlimentos ? state.adminAlimentoSearch : state.adminBebidaSearch || '').toLowerCase();
+                const filteredItems = sourceArray.filter(c => c.toLowerCase().includes(searchQuery));
+                
+                if (checked) {
+                    filteredItems.forEach(c => {
+                        if (isAlimentos && !state.adminSelectedAlimentos.includes(c)) state.adminSelectedAlimentos.push(c);
+                        if (!isAlimentos && !state.adminSelectedBebidas.includes(c)) state.adminSelectedBebidas.push(c);
+                    });
+                } else {
+                    if (isAlimentos) state.adminSelectedAlimentos = state.adminSelectedAlimentos.filter(c => !filteredItems.includes(c));
+                    else state.adminSelectedBebidas = state.adminSelectedBebidas.filter(c => !filteredItems.includes(c));
+                }
+                renderView();
+            },
+
+            toggleCatalogSelect: (catalogType, item) => {
+                const targetArray = catalogType === 'alimentos' ? state.adminSelectedAlimentos : state.adminSelectedBebidas;
+                const idx = targetArray.indexOf(item);
+                if (idx > -1) targetArray.splice(idx, 1);
+                else targetArray.push(item);
+                renderView();
+            },
+
+            deleteSelectedCatalog: (catalogType) => {
+                const targetSelected = catalogType === 'alimentos' ? state.adminSelectedAlimentos : state.adminSelectedBebidas;
+                if (!confirm(`¿Estás seguro de eliminar ${targetSelected.length} artículo(s) de todos los menús?`)) return;
+                
+                const fullData = getFullLocalData();
+                targetSelected.forEach(item => {
+                    if (catalogType === 'alimentos') state.adminData.alimentos = state.adminData.alimentos.filter(c => c !== item);
+                    else state.adminData.bebidas = state.adminData.bebidas.filter(c => c !== item);
+                    fullData.cycles.forEach(c => { c.weeks.forEach(w => { DIAS_SEMANA.forEach(d => { if (w.menu[d]) w.menu[d] = w.menu[d].filter(f => f !== item); }); }); });
+                });
+                
+                fullData.adminData = state.adminData; saveFullLocalData(fullData);
+                if (catalogType === 'alimentos') state.adminSelectedAlimentos = [];
+                else state.adminSelectedBebidas = [];
+                loadLocalData(); renderView();
+            },
+
+            editAdminItem: (type, oldVal) => {
+                if(type === 'student') return; 
+
+                const newVal = prompt("Editar valor:", oldVal);
+                if (newVal === null || newVal.trim() === '' || newVal.trim() === oldVal) return; 
+                
+                const cleanVal = newVal.trim();
+                const fullData = getFullLocalData();
+                let needsSave = false;
+
+                if (type === 'grade') {
+                    const idx = state.adminData.grades.indexOf(oldVal);
+                    if (idx > -1) {
+                        state.adminData.grades[idx] = cleanVal;
+                        state.adminData.students[cleanVal] = state.adminData.students[oldVal] || [];
+                        delete state.adminData.students[oldVal];
+                        if (state.adminSelectedGrade === oldVal) state.adminSelectedGrade = cleanVal;
+                        needsSave = true;
+                    }
+                } else if (type === 'alimento' || type === 'bebida') {
+                    const targetArray = type === 'alimento' ? state.adminData.alimentos : state.adminData.bebidas;
+                    const idx = targetArray.indexOf(oldVal);
+                    if (idx > -1) {
+                        targetArray[idx] = cleanVal;
+                        fullData.cycles.forEach(c => { c.weeks.forEach(w => { DIAS_SEMANA.forEach(d => { if (w.menu[d]) { const mIdx = w.menu[d].indexOf(oldVal); if (mIdx > -1) w.menu[d][mIdx] = cleanVal; } }); }); });
+                        if (type === 'alimento') { const cIdx = state.adminSelectedAlimentos.indexOf(oldVal); if (cIdx > -1) state.adminSelectedAlimentos[cIdx] = cleanVal; } 
+                        else { const cIdx = state.adminSelectedBebidas.indexOf(oldVal); if (cIdx > -1) state.adminSelectedBebidas[cIdx] = cleanVal; }
+                        needsSave = true;
+                    }
+                }
+
+                if (needsSave) { fullData.adminData = state.adminData; saveFullLocalData(fullData); loadLocalData(); renderView(); }
+            },
+
+            deleteAdminItem: (type, itemVal) => {
+                if (!confirm(`¿Estás seguro de eliminar este elemento?`)) return;
+                
+                const fullData = getFullLocalData();
+                let needsSave = false;
+
+                if (type === 'grade') {
+                    state.adminData.grades = state.adminData.grades.filter(g => g !== itemVal);
+                    delete state.adminData.students[itemVal];
+                    if (state.adminSelectedGrade === itemVal) state.adminSelectedGrade = '';
+                    needsSave = true;
+                } else if (type === 'student') {
+                    if (state.adminSelectedGrade) {
+                        state.adminData.students[state.adminSelectedGrade] = state.adminData.students[state.adminSelectedGrade].filter(s => s.id !== itemVal);
+                        state.adminSelectedStudents = state.adminSelectedStudents.filter(id => id !== itemVal);
+                        needsSave = true;
+                    }
+                } else if (type === 'alimento' || type === 'bebida') {
+                    if (type === 'alimento') {
+                        state.adminData.alimentos = state.adminData.alimentos.filter(c => c !== itemVal);
+                        state.adminSelectedAlimentos = state.adminSelectedAlimentos.filter(c => c !== itemVal);
+                    } else {
+                        state.adminData.bebidas = state.adminData.bebidas.filter(c => c !== itemVal);
+                        state.adminSelectedBebidas = state.adminSelectedBebidas.filter(c => c !== itemVal);
+                    }
+                    fullData.cycles.forEach(c => { c.weeks.forEach(w => { DIAS_SEMANA.forEach(d => { if (w.menu[d]) w.menu[d] = w.menu[d].filter(f => f !== itemVal); }); }); });
+                    needsSave = true;
+                }
+
+                if (needsSave) { fullData.adminData = state.adminData; saveFullLocalData(fullData); loadLocalData(); renderView(); }
+            },
+
+            saveContactInfo: (e) => {
+                e.preventDefault();
+                state.adminData.contactInfo = { 
+                    name: document.getElementById('contact-name').value.trim(), 
+                    phone: document.getElementById('contact-phone').value.trim() 
+                };
+                const fullData = getFullLocalData(); fullData.adminData = state.adminData; saveFullLocalData(fullData);
+                alert("¡Información de contacto guardada correctamente!");
+            },
+
+            savePasswords: (e) => {
+                e.preventDefault();
+                state.adminData.passwords = { admin: document.getElementById('pwd-admin').value.trim(), cocina: document.getElementById('pwd-cocina').value.trim(), escuela: document.getElementById('pwd-escuela').value.trim() };
+                const fullData = getFullLocalData(); fullData.adminData = state.adminData; saveFullLocalData(fullData);
+                alert("¡Contraseñas actualizadas correctamente!");
+            }
+        };
+
+        // Arrancamos Firebase
+        initFirebase();
+
+    </script>
+</body>
+</html>
