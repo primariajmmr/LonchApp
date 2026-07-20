@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Tienda Escolar V4.1 - JMMR </title>
+    <title>LonchApp</title>
+    <link rel="icon" type="image/png" href="https://lh3.googleusercontent.com/d/1tovbiGsHYnyd6urb9wYv_Sg45TYBtATd">
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Lucide Icons -->
@@ -40,13 +41,8 @@
                         <i data-lucide="chevron-left" class="w-6 h-6"></i>
                     </button>
                     <div class="flex items-center gap-2">
-                        <div class="bg-blue-600 text-white p-1.5 rounded-lg">
-                            <i data-lucide="utensils-crossed" class="w-5 h-5"></i>
-                        </div>
-                        <h1 class="font-bold text-xl tracking-tight text-slate-900">
-                            Tienda Escolar <span class="text-blue-600 font-black">v4.1</span>
-                        </h1>
-                    </div>
+                                <img src="https://lh3.googleusercontent.com/d/14MLjP5S2pcYTla3sR14wfydSPdbLuxoP" alt="LonchApp" class="h-10 w-auto object-contain">
+                            </div>
                 </div>
             </div>
         </header>
@@ -84,17 +80,17 @@
         const docRef = doc(db, 'artifacts', 'tienda-escolar-jmmr', 'public', 'data', 'tienda_data', 'main');
 
         // --- CONSTANTES ---
-        const ALIMENTOS_BASE = ['Torta de Jamón', 'Sándwich de Pollo', 'Molletes con Queso', 'Quesadillas', 'Chilaquiles Suaves', 'Hot Cakes', 'Fruta Picada', 'Yogurt con Cereal', 'Gelatina'];
-        const BEBIDAS_BASE = ['Jugo de Naranja', 'Jugo de Manzana', 'Leche con Chocolate', 'Licuado de Fresa', 'Avena'];
+        const ALIMENTOS_BASE = [];
+        const BEBIDAS_BASE = [];
         const DIAS_SEMANA = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes'];
         const GRADOS = ['1A', '1B', '2A', '2B', '3A', '3B', '4A', '5A', '6A'];
         
         const MENU_POR_DEFECTO = {
-            Lunes: ['Torta de Jamón', 'Jugo de Naranja', 'Fruta Picada'],
-            Martes: ['Molletes con Queso', 'Leche con Chocolate', 'Gelatina'],
-            Miércoles: ['Sándwich de Pollo', 'Licuado de Fresa', 'Avena'],
-            Jueves: ['Quesadillas', 'Jugo de Manzana', 'Yogurt con Cereal'],
-            Viernes: ['Chilaquiles Suaves', 'Jugo de Naranja', 'Hot Cakes']
+            Lunes: [],
+            Martes: [],
+            Miércoles: [],
+            Jueves: [],
+            Viernes: []
         };
 
         // --- ESTADO GLOBAL ---
@@ -137,6 +133,11 @@
             
             adminOrderDay: 'Lunes',
             adminOrderGrade: 'Todos',
+            
+            adminTab: 'config', // Nueva propiedad para controlar tabs del admin
+            
+            activeModal: null,
+            modalData: {},
 
             dbConnected: false // Estado de conexión de Firebase
         };
@@ -173,8 +174,8 @@
             const currentActiveCycle = state.cycles.find(c => c.id === state.activeCycleId) || state.cycles[0];
             state.activeWeekId = currentActiveCycle ? currentActiveCycle.activeWeekId : null;
             
-            if (!state.adminData.alimentos) state.adminData.alimentos = [...ALIMENTOS_BASE];
-            if (!state.adminData.bebidas) state.adminData.bebidas = [...BEBIDAS_BASE];
+            if (!state.adminData.alimentos) state.adminData.alimentos = [];
+            if (!state.adminData.bebidas) state.adminData.bebidas = [];
             if (!state.adminData.passwords) state.adminData.passwords = { admin: 'admin', cocina: '', escuela: '' };
             if (!state.adminData.contactInfo) state.adminData.contactInfo = { name: '', phone: '' };
             if (!state.adminData.settings) state.adminData.settings = { homeOrderSchedule: { mode: 'always', days: [1,2,3,4,5], start: '07:00', end: '16:00' } };
@@ -224,8 +225,8 @@
                 adminData: {
                     grades: [...GRADOS],
                     students: {},
-                    alimentos: [...ALIMENTOS_BASE],
-                    bebidas: [...BEBIDAS_BASE],
+                    alimentos: [],
+                    bebidas: [],
                     passwords: { admin: 'admin', cocina: '', escuela: '' },
                     contactInfo: { name: '', phone: '' },
                     settings: { homeOrderSchedule: { mode: 'always', days: [1,2,3,4,5], start: '07:00', end: '16:00' } }
@@ -322,9 +323,12 @@
                 if (state.view === 'escuela') container.innerHTML = renderSchoolView();
                 if (state.view === 'casa') container.innerHTML = renderParentView();
                 if (state.view === 'admin') container.innerHTML = renderAdminView();
+                if (state.view === 'login-cocina') container.innerHTML = renderLoginView('cocina', 'Cocina', 'chef-hat', 'emerald');
+                if (state.view === 'login-escuela') container.innerHTML = renderLoginView('escuela', 'Gestión Escolar', 'school', 'blue');
+                if (state.view === 'login-admin') container.innerHTML = renderLoginView('admin', 'Administración', 'lock', 'slate');
             }
             
-            modalContainer.innerHTML = state.editingStudent ? renderEditStudentModal() : '';
+            modalContainer.innerHTML = renderActiveModal();
             if ((state.view === 'escuela' && state.schoolTab === 'pedidos') || (state.view === 'casa' && state.loggedStudent)) {
                 setTimeout(() => window.app.updateOrderFormUI(state.view === 'escuela' ? 'Escuela' : 'Casa'), 0);
             }
@@ -345,31 +349,69 @@
             return `
                 <div class="max-w-3xl mx-auto fade-in">
                     <div class="text-center mb-10 mt-4">
+                        <h1 class="text-5xl font-black text-slate-900 mb-2 tracking-tight">Lonch<span class="text-blue-600">App</span></h1>
                         <h2 class="text-3xl font-bold text-slate-900 mb-3">Selecciona tu perfil</h2>
                         <p class="text-slate-500">Accede a la sección correspondiente para gestionar los pedidos.</p>
                     </div>
                     <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        <button onclick="window.app.requestAccess('cocina')" class="group relative bg-white p-8 rounded-3xl shadow-sm border border-slate-100 hover:shadow-xl hover:border-emerald-200 transition-all text-left flex flex-col h-full focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2">
+                        <button onclick="window.app.requestAccess('cocina')" class="group relative bg-white p-8 rounded-3xl shadow-sm border border-slate-100 hover:shadow-xl hover:border-emerald-200 transition-all text-center flex flex-col items-center focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2">
                             ${badgeHtml}
                             <div class="bg-emerald-100 text-emerald-600 w-16 h-16 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform"><i data-lucide="chef-hat" class="w-8 h-8"></i></div>
                             <h3 class="text-2xl font-bold group-hover:text-emerald-600 transition-colors">Cocina</h3>
                         </button>
-                        <button onclick="window.app.requestAccess('escuela')" class="group bg-white p-8 rounded-3xl shadow-sm border border-slate-100 hover:shadow-xl hover:border-blue-200 transition-all text-left flex flex-col h-full focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
+                        <button onclick="window.app.requestAccess('escuela')" class="group bg-white p-8 rounded-3xl shadow-sm border border-slate-100 hover:shadow-xl hover:border-blue-200 transition-all text-center flex flex-col items-center focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2">
                             <div class="bg-blue-100 text-blue-600 w-16 h-16 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform"><i data-lucide="school" class="w-8 h-8"></i></div>
                             <h3 class="text-2xl font-bold group-hover:text-blue-600 transition-colors">Escuela</h3>
                         </button>
-                        <button onclick="window.app.requestAccess('casa')" class="group bg-white p-8 rounded-3xl shadow-sm border border-slate-100 hover:shadow-xl hover:border-amber-200 transition-all text-left flex flex-col h-full focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2">
+                        <button onclick="window.app.requestAccess('casa')" class="group bg-white p-8 rounded-3xl shadow-sm border border-slate-100 hover:shadow-xl hover:border-amber-200 transition-all text-center flex flex-col items-center focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2">
                             <div class="bg-amber-100 text-amber-600 w-16 h-16 rounded-2xl flex items-center justify-center mb-6 group-hover:scale-110 transition-transform"><i data-lucide="home" class="w-8 h-8"></i></div>
                             <h3 class="text-2xl font-bold group-hover:text-amber-600 transition-colors">Casa</h3>
                         </button>
                     </div>
                     <div class="mt-16 flex flex-col items-center">
-                        <button onclick="window.app.requestAccess('admin')" class="inline-flex items-center gap-2 text-slate-400 hover:text-slate-700 transition-colors text-sm font-medium focus:outline-none">
+                        <button onclick="window.app.requestAccess('admin')" class="inline-flex items-center justify-center gap-2 text-slate-400 hover:text-slate-700 transition-colors text-sm font-medium focus:outline-none">
                             <i data-lucide="settings" class="w-4 h-4"></i> Administración del Sistema
                         </button>
                         <div class="mt-2 text-[10px] font-semibold tracking-wide">
                             ${dbStatusHtml}
                         </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderLoginView(section, title, icon, color) {
+            const colorBg = { 'emerald': 'bg-emerald-100', 'blue': 'bg-blue-100', 'slate': 'bg-slate-100' };
+            const colorText = { 'emerald': 'text-emerald-600', 'blue': 'text-blue-600', 'slate': 'text-slate-600' };
+            const colorBtn = { 'emerald': 'bg-emerald-600 hover:bg-emerald-700', 'blue': 'bg-blue-600 hover:bg-blue-700', 'slate': 'bg-slate-900 hover:bg-slate-800' };
+            const colorFocus = { 'emerald': 'focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200', 'blue': 'focus:border-blue-500 focus:ring-2 focus:ring-blue-200', 'slate': 'focus:border-slate-500 focus:ring-2 focus:ring-slate-200' };
+
+            return `
+                <div class="min-h-screen flex items-center justify-center p-4 bg-gradient-to-br from-slate-50 to-slate-100 fade-in">
+                    <div class="bg-white rounded-3xl shadow-2xl p-8 sm:p-12 w-full max-w-md border border-slate-100">
+                        <div class="flex justify-center mb-6">
+                            <div class="${colorBg[color]} ${colorText[color]} w-20 h-20 rounded-2xl flex items-center justify-center">
+                                <i data-lucide="${icon}" class="w-10 h-10"></i>
+                            </div>
+                        </div>
+                        
+                        <h1 class="text-3xl font-bold text-slate-900 text-center mb-2">${title}</h1>
+                        <p class="text-slate-500 text-center mb-8">Ingresa tu contraseña para continuar</p>
+                        
+                        <form onsubmit="window.app.validateLogin(event, '${section}')" class="space-y-6">
+                            <div>
+                                <label class="block text-sm font-semibold text-slate-700 mb-2">Contraseña</label>
+                                <input type="password" id="login-password" placeholder="Ingresa la contraseña" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none ${colorFocus[color]} transition-all text-slate-700 font-medium" required autofocus>
+                            </div>
+                            
+                            <button type="submit" class="w-full ${colorBtn[color]} text-white py-3 rounded-xl font-bold text-lg transition-colors shadow-md flex items-center justify-center gap-2">
+                                <i data-lucide="lock-open" class="w-5 h-5"></i> Ingresar
+                            </button>
+                        </form>
+                        
+                        <button type="button" onclick="window.app.setView('home')" class="w-full mt-4 bg-slate-100 hover:bg-slate-200 text-slate-700 py-3 rounded-xl font-semibold transition-colors flex items-center justify-center gap-2">
+                            <i data-lucide="arrow-left" class="w-5 h-5"></i> Volver
+                        </button>
                     </div>
                 </div>
             `;
@@ -425,7 +467,7 @@
                             Seleccionar Todos
                         </label>
                         ${state.kitchenSelectedDelivered.length > 0 ? `
-                            <button onclick="window.app.deleteSelectedKitchenDelivered()" class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition-colors shadow-sm">
+                            <button onclick="window.app.deleteSelectedKitchenDelivered()" class="bg-red-500 hover:bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center justify-center gap-2 transition-colors shadow-sm">
                                 <i data-lucide="trash-2" class="w-4 h-4"></i> Eliminar (${state.kitchenSelectedDelivered.length})
                             </button>
                         ` : ''}
@@ -593,8 +635,8 @@
                         </div>
 
                         <div class="flex flex-wrap bg-slate-200/60 p-1 rounded-xl gap-1 mt-4 sm:mt-0 self-end">
-                            <button onclick="window.app.setSchoolTab('pedidos')" class="px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-2 ${isPedidos ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}"><i data-lucide="shopping-bag" class="w-4 h-4"></i> Pedidos</button>
-                            <button onclick="window.app.setSchoolTab('menu')" class="px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-2 ${isMenu ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}"><i data-lucide="settings" class="w-4 h-4"></i> Config. Menú</button>
+                            <button onclick="window.app.setSchoolTab('pedidos')" class="px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center justify-center gap-2 ${isPedidos ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}"><i data-lucide="shopping-bag" class="w-4 h-4"></i> Pedidos</button>
+                            <button onclick="window.app.setSchoolTab('menu')" class="px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center justify-center gap-2 ${isMenu ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}"><i data-lucide="settings" class="w-4 h-4"></i> Config. Menú</button>
                         </div>
                     </div>
                     
@@ -918,7 +960,7 @@
                         </div>
                     </div>
                     <div class="pt-4 border-t border-slate-100 flex justify-end">
-                        <button onclick="window.app.saveMenu()" class="bg-slate-900 hover:bg-slate-800 text-white px-8 py-3 rounded-xl font-bold transition-colors flex items-center gap-2">
+                        <button onclick="window.app.saveMenu()" class="bg-slate-900 hover:bg-slate-800 text-white px-8 py-3 rounded-xl font-bold transition-colors flex items-center justify-center gap-2">
                             <i data-lucide="save" class="w-5 h-5"></i> Guardar Menú
                         </button>
                     </div>
@@ -927,15 +969,204 @@
         }
 
         function renderAdminView() {
-            const managingCycle = getManagingCycle();
+            // Tabs del admin: config, planificacion, grados, alumnos, alimentos, bebidas, reporte, pedidos
+            const tabButtons = `
+                <div class="flex flex-wrap gap-2 p-4 bg-white border-b border-slate-200 overflow-x-auto custom-scrollbar">
+                    <button onclick="window.app.setAdminTab('config')" class="px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-2 whitespace-nowrap ${state.adminTab === 'config' ? 'bg-indigo-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200'}"><i data-lucide="settings" class="w-4 h-4"></i> Configuración</button>
+                    <button onclick="window.app.setAdminTab('planificacion')" class="px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-2 whitespace-nowrap ${state.adminTab === 'planificacion' ? 'bg-indigo-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200'}"><i data-lucide="calendar-days" class="w-4 h-4"></i> Ciclos y Semanas</button>
+                    <button onclick="window.app.setAdminTab('grados')" class="px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-2 whitespace-nowrap ${state.adminTab === 'grados' ? 'bg-indigo-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200'}"><i data-lucide="graduation-cap" class="w-4 h-4"></i> Grados</button>
+                    <button onclick="window.app.setAdminTab('alumnos')" class="px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-2 whitespace-nowrap ${state.adminTab === 'alumnos' ? 'bg-indigo-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200'}"><i data-lucide="users" class="w-4 h-4"></i> Alumnos</button>
+                    <button onclick="window.app.setAdminTab('alimentos')" class="px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-2 whitespace-nowrap ${state.adminTab === 'alimentos' ? 'bg-indigo-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200'}"><i data-lucide="pizza" class="w-4 h-4"></i> Alimentos y Bebidas</button>
+                    <button onclick="window.app.setAdminTab('reporte')" class="px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-2 whitespace-nowrap ${state.adminTab === 'reporte' ? 'bg-indigo-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200'}"><i data-lucide="bar-chart-3" class="w-4 h-4"></i> Reporte de Ventas</button>
+                    <button onclick="window.app.setAdminTab('pedidos')" class="px-4 py-2 rounded-lg text-sm font-semibold transition-all flex items-center gap-2 whitespace-nowrap ${state.adminTab === 'pedidos' ? 'bg-indigo-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200 border border-slate-200'}"><i data-lucide="list-collapse" class="w-4 h-4"></i> Gestor Pedidos</button>
+                </div>
+            `;
+
+            let contentHtml = '';
             
+            if (state.adminTab === 'config') {
+                contentHtml = renderAdminTabConfig();
+            } else if (state.adminTab === 'planificacion') {
+                contentHtml = renderAdminTabPlanificacion();
+            } else if (state.adminTab === 'grados') {
+                contentHtml = renderAdminTabGrados();
+            } else if (state.adminTab === 'alumnos') {
+                contentHtml = renderAdminTabAlumnos();
+            } else if (state.adminTab === 'alimentos') {
+                contentHtml = renderAdminTabAlimentosYBebidas();
+            } else if (state.adminTab === 'reporte') {
+                contentHtml = renderAdminTabReporte();
+            } else if (state.adminTab === 'pedidos') {
+                contentHtml = renderAdminTabPedidos();
+            }
+
+            return `
+                <div class="space-y-6 animate-in fade-in duration-300">
+                    <div class="border-b border-slate-100 pb-4">
+                        <h3 class="font-bold text-2xl text-slate-900 flex items-center gap-2">
+                            <i data-lucide="database" class="w-6 h-6 text-slate-600"></i> Administración del Sistema
+                        </h3>
+                        <p class="text-slate-500 text-sm mt-1">Gestiona ciclos, catálogos, reportes y accesos. <span class="text-slate-300 text-xs">v4.5</span></p>
+                    </div>
+
+                    ${tabButtons}
+                    
+                    <div class="p-6">
+                        ${contentHtml}
+                    </div>
+                </div>
+            `;
+        }
+
+        // Renderizar Modal Activo
+        function renderActiveModal() {
+            if (state.editingStudent) return renderEditStudentModal();
+            if (!state.activeModal) return '';
+            
+            if (state.activeModal === 'create-cycle') return renderCreateCycleModal();
+            if (state.activeModal === 'edit-cycle') return renderEditCycleModal();
+            if (state.activeModal === 'create-week') return renderCreateWeekModal();
+            if (state.activeModal === 'edit-week') return renderEditWeekModal();
+            
+            return '';
+        }
+
+        function renderCreateCycleModal() {
+            return `
+                <div class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 fade-in">
+                    <div class="bg-white rounded-3xl p-8 w-full max-w-md shadow-2xl border border-slate-100">
+                        <h3 class="text-2xl font-bold text-slate-900 mb-2 flex items-center gap-2"><i data-lucide="calendar-plus" class="w-6 h-6 text-indigo-600"></i> Nuevo Ciclo Escolar</h3>
+                        <p class="text-slate-500 text-sm mb-6">Crea un nuevo ciclo para empezar a gestionar pedidos.</p>
+                        <form onsubmit="window.app.submitCreateCycle(event)" class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-semibold text-slate-700 mb-2">Nombre del Ciclo</label>
+                                <input type="text" id="modal-cycle-name" placeholder="Ej. Ciclo 2026-2027" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 transition-all text-slate-700" required autofocus>
+                            </div>
+                            <div class="pt-4 border-t border-slate-100 flex gap-3">
+                                <button type="button" onclick="window.app.closeModal()" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 py-2.5 rounded-xl font-semibold transition-colors">Cancelar</button>
+                                <button type="submit" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-2.5 rounded-xl font-semibold transition-colors">Crear Ciclo</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderEditCycleModal() {
+            const cycle = state.cycles.find(c => c.id === state.managingCycleId);
+            if (!cycle) return '';
+            return `
+                <div class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 fade-in">
+                    <div class="bg-white rounded-3xl p-8 w-full max-w-md shadow-2xl border border-slate-100">
+                        <h3 class="text-2xl font-bold text-slate-900 mb-2 flex items-center gap-2"><i data-lucide="pencil" class="w-6 h-6 text-blue-600"></i> Editar Ciclo</h3>
+                        <p class="text-slate-500 text-sm mb-6">Modifica el nombre del ciclo escolar.</p>
+                        <form onsubmit="window.app.submitEditCycle(event)" class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-semibold text-slate-700 mb-2">Nombre del Ciclo</label>
+                                <input type="text" id="modal-cycle-edit-name" value="${cycle.name}" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all text-slate-700" required autofocus>
+                            </div>
+                            <div class="pt-4 border-t border-slate-100 flex gap-3">
+                                <button type="button" onclick="window.app.closeModal()" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 py-2.5 rounded-xl font-semibold transition-colors">Cancelar</button>
+                                <button type="submit" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-xl font-semibold transition-colors">Guardar Cambios</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderCreateWeekModal() {
+            return `
+                <div class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 fade-in">
+                    <div class="bg-white rounded-3xl p-8 w-full max-w-md shadow-2xl border border-slate-100">
+                        <h3 class="text-2xl font-bold text-slate-900 mb-2 flex items-center gap-2"><i data-lucide="calendar-plus" class="w-6 h-6 text-emerald-600"></i> Nueva Semana</h3>
+                        <p class="text-slate-500 text-sm mb-6">Agrega una nueva semana al ciclo actual.</p>
+                        <form onsubmit="window.app.submitCreateWeek(event)" class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-semibold text-slate-700 mb-2">Fecha o Rango de Fechas</label>
+                                <input type="text" id="modal-week-range" placeholder="Ej. del 13 al 17 de julio" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-200 transition-all text-slate-700" required autofocus>
+                            </div>
+                            <div class="pt-4 border-t border-slate-100 flex gap-3">
+                                <button type="button" onclick="window.app.closeModal()" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 py-2.5 rounded-xl font-semibold transition-colors">Cancelar</button>
+                                <button type="submit" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 rounded-xl font-semibold transition-colors">Crear Semana</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderEditWeekModal() {
+            const cycle = getManagingCycle();
+            const week = cycle ? cycle.weeks.find(w => w.id === state.managingWeekId) : null;
+            if (!week) return '';
+            return `
+                <div class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 fade-in">
+                    <div class="bg-white rounded-3xl p-8 w-full max-w-md shadow-2xl border border-slate-100">
+                        <h3 class="text-2xl font-bold text-slate-900 mb-2 flex items-center gap-2"><i data-lucide="pencil" class="w-6 h-6 text-amber-600"></i> Editar Semana</h3>
+                        <p class="text-slate-500 text-sm mb-6">Modifica la fecha o rango de fechas.</p>
+                        <form onsubmit="window.app.submitEditWeek(event)" class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-semibold text-slate-700 mb-2">Fecha o Rango de Fechas</label>
+                                <input type="text" id="modal-week-edit-range" value="${week.range}" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200 transition-all text-slate-700" required autofocus>
+                            </div>
+                            <div class="pt-4 border-t border-slate-100 flex gap-3">
+                                <button type="button" onclick="window.app.closeModal()" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 py-2.5 rounded-xl font-semibold transition-colors">Cancelar</button>
+                                <button type="submit" class="flex-1 bg-amber-600 hover:bg-amber-700 text-white py-2.5 rounded-xl font-semibold transition-colors">Guardar Cambios</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Funciones de tabs del admin
+        function renderAdminTabConfig() {
+            const sched = state.adminData.settings?.homeOrderSchedule || { mode: 'always', days: [1,2,3,4,5], start: '07:00', end: '16:00' };
+            const daysObj = [{id:1,name:'L'},{id:2,name:'M'},{id:3,name:'M'},{id:4,name:'J'},{id:5,name:'V'},{id:6,name:'S'},{id:0,name:'D'}];
+            
+            let scheduleHtml = `<div><h5 class="text-xs font-bold text-slate-500 mb-3 uppercase tracking-wider border-b border-slate-100 pb-2">Horario Pedidos (Casa)</h5><div class="space-y-3"><div class="flex flex-col sm:flex-row sm:items-center gap-3"><label class="flex items-center gap-2 cursor-pointer text-sm text-slate-700 bg-slate-50 px-3 py-2 rounded-lg border border-slate-200 hover:bg-blue-50 w-full sm:w-auto"><input type="radio" name="sched_mode" value="always" ${sched.mode==='always'?'checked':''} onchange="window.app.updateScheduleMode(this.value)" class="w-4 h-4 text-blue-600">Siempre Abierto</label><label class="flex items-center gap-2 cursor-pointer text-sm text-slate-700 bg-slate-50 px-3 py-2 rounded-lg border border-slate-200 hover:bg-blue-50 w-full sm:w-auto"><input type="radio" name="sched_mode" value="scheduled" ${sched.mode==='scheduled'?'checked':''} onchange="window.app.updateScheduleMode(this.value)" class="w-4 h-4 text-blue-600">Restringido</label></div><div class="${sched.mode==='scheduled'?'block':'hidden'} bg-blue-50/50 p-4 rounded-xl border border-blue-100"><p class="text-xs font-bold text-slate-600 mb-2">Días Activos:</p><div class="flex flex-wrap gap-1.5 mb-4">${daysObj.map(d=>`<label class="flex items-center gap-1 bg-white px-2.5 py-1.5 rounded-lg border border-slate-200 cursor-pointer text-xs font-semibold shadow-sm hover:border-blue-300"><input type="checkbox" onchange="window.app.toggleScheduleDay(${d.id})" ${sched.days.includes(d.id)?'checked':''} class="w-3.5 h-3.5 text-blue-600 rounded">${d.name}</label>`).join('')}</div><p class="text-xs font-bold text-slate-600 mb-2">Rango de Horas:</p><div class="flex items-center gap-3"><input type="time" id="sched_start" value="${sched.start}" onchange="window.app.saveScheduleTime()" class="border border-slate-300 rounded-lg px-3 py-2 text-sm flex-1 outline-none focus:border-blue-500 bg-white shadow-sm"><span class="text-slate-400 font-bold">-</span><input type="time" id="sched_end" value="${sched.end}" onchange="window.app.saveScheduleTime()" class="border border-slate-300 rounded-lg px-3 py-2 text-sm flex-1 outline-none focus:border-blue-500 bg-white shadow-sm"></div></div></div></div>`;
+
+            return `
+                <div class="space-y-6">
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                        <div class="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
+                            <h5 class="text-xs font-bold text-slate-500 mb-3 uppercase tracking-wider border-b border-slate-100 pb-2">Contacto de Ventas (Padres)</h5>
+                            <form onsubmit="window.app.saveContactInfo(event)" class="space-y-4">
+                                <div><label class="block text-sm font-semibold text-slate-700 mb-1">Nombre del Responsable</label><input type="text" id="contact-name" value="${state.adminData.contactInfo.name || ''}" placeholder="Ej. Patricia Corona" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 outline-none focus:border-blue-500"></div>
+                                <div><label class="block text-sm font-semibold text-slate-700 mb-1">Teléfono</label><input type="text" id="contact-phone" value="${state.adminData.contactInfo.phone || ''}" placeholder="Ej. 555-123-4567" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 outline-none focus:border-blue-500"></div>
+                                <button type="submit" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg text-sm font-semibold transition-colors">Guardar Contacto</button>
+                            </form>
+                        </div>
+                        
+                        <div class="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
+                            <h5 class="text-xs font-bold text-slate-500 mb-3 uppercase tracking-wider border-b border-slate-100 pb-2">Contraseñas del Personal</h5>
+                            <p class="text-[11px] text-slate-400 mb-3 leading-tight">Si lo dejas en blanco, no se pedirá contraseña.</p>
+                            <form onsubmit="window.app.savePasswords(event)" class="space-y-4">
+                                <div><label class="block text-sm font-semibold text-slate-700 mb-1">Administración</label><input type="text" id="pwd-admin" value="${state.adminData.passwords.admin || ''}" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 text-sm outline-none focus:border-blue-500"></div>
+                                <div><label class="block text-sm font-semibold text-slate-700 mb-1">Cocina</label><input type="text" id="pwd-cocina" value="${state.adminData.passwords.cocina || ''}" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 text-sm outline-none focus:border-blue-500"></div>
+                                <div><label class="block text-sm font-semibold text-slate-700 mb-1">Gestión Escolar</label><input type="text" id="pwd-escuela" value="${state.adminData.passwords.escuela || ''}" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 text-sm outline-none focus:border-blue-500"></div>
+                                <button type="submit" class="w-full bg-slate-900 hover:bg-slate-800 text-white px-5 py-2 rounded-lg text-sm font-semibold transition-colors">Guardar Claves</button>
+                            </form>
+                        </div>
+
+                        <div class="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
+                            ${scheduleHtml}
+                        </div>
+                    </div>
+            `;
+        }
+
+        function renderAdminTabPlanificacion() {
+            const managingCycle = getManagingCycle();
             let cycleOptionsHtml = '';
+            let weekOptionsHtml = '';
+            
             state.cycles.forEach(c => {
                 let statusLabel = c.id === state.activeCycleId ? ' (Activo)' : '';
                 cycleOptionsHtml += `<option value="${c.id}" ${c.id === state.managingCycleId ? 'selected' : ''}>${c.name}${statusLabel}</option>`;
             });
-
-            let weekOptionsHtml = '';
+            
             if (managingCycle && managingCycle.weeks.length > 0) {
                 managingCycle.weeks.forEach(w => {
                     let statusLabel = w.status === 'active' ? ' (Activa)' : w.status === 'archived' ? ' (Archivada)' : ' (Planeada)';
@@ -945,499 +1176,127 @@
                 weekOptionsHtml = `<option value="">Sin semanas creadas</option>`;
             }
 
+            return `
+                <div class="space-y-6">
+                    <div class="bg-indigo-50 p-6 rounded-2xl border border-indigo-100">
+                        <h4 class="font-bold text-indigo-900 mb-4">Gestión de Ciclos y Semanas</h4>
+                        
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div><label class="block text-sm font-bold text-indigo-700 mb-2">Ciclo Escolar</label><div class="flex gap-1 items-center"><select onchange="window.app.setManagingCycle(this.value)" class="flex-1 bg-white border border-indigo-300 rounded-lg px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-200">${cycleOptionsHtml}</select><button onclick="window.app.editManagingCycle()" class="bg-blue-100 hover:bg-blue-200 text-blue-600 p-3 rounded-lg transition-colors"><i data-lucide="pencil" class="w-4 h-4"></i></button><button onclick="window.app.deleteManagingCycle()" class="bg-red-100 hover:bg-red-200 text-red-600 p-3 rounded-lg transition-colors"><i data-lucide="trash-2" class="w-4 h-4"></i></button><button onclick="window.app.createNewCycle()" class="bg-emerald-100 hover:bg-emerald-200 text-emerald-600 p-3 rounded-lg transition-colors"><i data-lucide="plus-circle" class="w-4 h-4"></i></button></div></div>
+                            
+                            <div><label class="block text-sm font-bold text-indigo-700 mb-2">Semana</label><div class="flex gap-1 items-center"><select onchange="window.app.setManagingWeek(this.value)" class="flex-1 bg-white border border-indigo-300 rounded-lg px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-200" ${!managingCycle || managingCycle.weeks.length === 0 ? 'disabled' : ''}>${weekOptionsHtml}</select><button onclick="window.app.editManagingWeek()" class="bg-blue-100 hover:bg-blue-200 text-blue-600 p-3 rounded-lg transition-colors" ${!managingCycle || managingCycle.weeks.length === 0 ? 'disabled' : ''}><i data-lucide="pencil" class="w-4 h-4"></i></button><button onclick="window.app.deleteManagingWeek()" class="bg-red-100 hover:bg-red-200 text-red-600 p-3 rounded-lg transition-colors" ${!managingCycle || managingCycle.weeks.length === 0 ? 'disabled' : ''}><i data-lucide="trash-2" class="w-4 h-4"></i></button><button onclick="window.app.createNewWeek()" class="bg-indigo-100 hover:bg-indigo-200 text-indigo-600 p-3 rounded-lg transition-colors"><i data-lucide="plus-square" class="w-4 h-4"></i></button></div></div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderAdminTabGrados() {
             let gradesListHtml = '';
             state.adminData.grades.forEach(g => {
                 gradesListHtml += `
-                    <div class="flex items-center justify-between bg-white border border-slate-200 p-2 rounded-lg shadow-sm">
-                        <span class="font-medium text-slate-700 truncate w-full pr-2" title="${g}">${g}</span>
-                        <div class="flex items-center flex-shrink-0">
-                            <button onclick="window.app.editAdminItem('grade', '${g.replace(/'/g, "\\'")}')" class="text-blue-500 hover:bg-blue-50 p-1 rounded-md transition-colors mr-1">
-                                <i data-lucide="pencil" class="w-4 h-4"></i>
-                            </button>
-                            <button onclick="window.app.deleteAdminItem('grade', '${g.replace(/'/g, "\\'")}')" class="text-red-500 hover:bg-red-50 p-1 rounded-md transition-colors">
-                                <i data-lucide="trash-2" class="w-4 h-4"></i>
-                            </button>
+                    <div class="flex items-center justify-between bg-white border border-slate-200 p-3 rounded-lg shadow-sm">
+                        <span class="font-bold text-slate-700">${g}</span>
+                        <div class="flex gap-1">
+                            <button onclick="window.app.editAdminItem('grade', '${g.replace(/'/g, "\\'")}')" class="text-blue-500 hover:bg-blue-50 p-2 rounded-md transition-colors"><i data-lucide="pencil" class="w-4 h-4"></i></button>
+                            <button onclick="window.app.deleteAdminItem('grade', '${g.replace(/'/g, "\\'")}')" class="text-red-500 hover:bg-red-50 p-2 rounded-md transition-colors"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
                         </div>
-                    </div>
-                `;
+                    </div>`;
             });
 
+            return `
+                <div class="space-y-4">
+                    <div class="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
+                        <h4 class="font-bold text-slate-900 mb-4">Añadir Nuevo Grado</h4>
+                        <form onsubmit="window.app.addAdminItem(event, 'grade')" class="flex gap-2 w-full md:w-1/2">
+                            <input type="text" id="new-grade-input" placeholder="Ej. 1A" class="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" required>
+                            <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-semibold transition-colors">Añadir Grado</button>
+                        </form>
+                    </div>
+
+                    <div class="bg-slate-50 p-5 rounded-2xl border border-slate-100">
+                        <h4 class="font-bold text-slate-900 mb-4">Grados Registrados</h4>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 max-h-96 overflow-y-auto custom-scrollbar pr-2">
+                            ${gradesListHtml || '<p class="text-slate-500 italic">No hay grados registrados</p>'}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderAdminTabAlumnos() {
             let gradesOptionsHtml = '<option value="">Selecciona un grado...</option>';
             state.adminData.grades.forEach(g => {
                 gradesOptionsHtml += `<option value="${g}" ${state.adminSelectedGrade === g ? 'selected' : ''}>${g}</option>`;
             });
 
-            let studentsListHtml = '';
-            let isAllStudentsSelected = false;
-            if (state.adminSelectedGrade) {
-                const students = state.adminData.students[state.adminSelectedGrade] || [];
-                const searchQuery = (state.adminStudentSearch || '').toLowerCase();
-                const filteredStudents = students.filter(s => s.name.toLowerCase().includes(searchQuery) || (s.curp && s.curp.toLowerCase().includes(searchQuery)));
-                
-                isAllStudentsSelected = filteredStudents.length > 0 && filteredStudents.every(s => state.adminSelectedStudents.includes(s.id));
+            return `
+                <div class="space-y-6">
+                    <div class="bg-blue-50 p-5 rounded-2xl border border-blue-100">
+                        <h4 class="font-bold text-blue-900 mb-4">Gestión de Alumnos</h4>
+                        <p class="text-sm text-blue-700 mb-4">Selecciona un grado para ver, agregar o editar alumnos.</p>
+                        <select onchange="window.app.adminSelectGrade(this.value)" class="w-full md:w-1/2 bg-white border border-blue-300 rounded-lg px-4 py-3 text-sm font-semibold outline-none focus:ring-2 focus:ring-blue-200">
+                            ${gradesOptionsHtml}
+                        </select>
+                    </div>
 
-                if (students.length === 0) {
-                    studentsListHtml = `<p class="text-slate-500 text-sm italic col-span-full">No hay alumnos en este grado.</p>`;
-                } else if (filteredStudents.length === 0) {
-                    studentsListHtml = `<p class="text-slate-500 text-sm italic col-span-full">No se encontraron coincidencias.</p>`;
-                } else {
-                    filteredStudents.forEach(s => {
-                        const isSelected = state.adminSelectedStudents.includes(s.id);
-                        const isBlocked = s.isBlocked;
-                        studentsListHtml += `
-                            <div class="flex items-center justify-between bg-white border ${isSelected ? 'border-blue-400 bg-blue-50/50' : (isBlocked ? 'border-red-200 bg-red-50/30' : 'border-slate-200')} p-2 rounded-lg shadow-sm transition-colors">
-                                <div class="flex items-center gap-2 flex-grow min-w-0">
-                                    <input type="checkbox" onchange="window.app.toggleStudentSelect('${s.id}')" ${isSelected ? 'checked' : ''} class="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500 cursor-pointer flex-shrink-0">
-                                    <div class="flex flex-col min-w-0">
-                                        <div class="flex items-center">
-                                            <span class="font-medium ${isBlocked ? 'text-red-700 line-through opacity-70' : 'text-slate-700'} text-sm truncate" title="${s.name}">${s.name}</span>
-                                            ${isBlocked ? '<span class="ml-2 text-[9px] bg-red-100 text-red-600 font-bold px-1.5 py-0.5 rounded uppercase">Bloqueado</span>' : ''}
-                                        </div>
-                                        ${s.password ? `<span class="text-[10px] text-slate-400 truncate">Pwd: ${s.password}</span>` : `<span class="text-[10px] text-red-400 truncate">Sin Pwd</span>`}
-                                    </div>
-                                </div>
-                                <div class="flex items-center flex-shrink-0">
-                                    <button type="button" onclick="window.app.toggleStudentBlock('${s.id}')" class="${isBlocked ? 'text-emerald-600 hover:bg-emerald-100' : 'text-amber-500 hover:bg-amber-100'} p-1.5 rounded-md transition-colors mr-1" title="${isBlocked ? 'Permitir Pedidos (Desbloquear)' : 'Bloquear Pedidos en Casa'}">
-                                        <i data-lucide="${isBlocked ? 'unlock' : 'lock'}" class="w-4 h-4"></i>
-                                    </button>
-                                    <button type="button" onclick="window.app.openEditStudentModal('${s.id}')" class="text-blue-500 hover:bg-blue-50 p-1.5 rounded-md transition-colors mr-1">
-                                        <i data-lucide="pencil" class="w-4 h-4"></i>
-                                    </button>
-                                    <button type="button" onclick="window.app.deleteAdminItem('student', '${s.id}')" class="text-red-500 hover:bg-red-50 p-1.5 rounded-md transition-colors">
-                                        <i data-lucide="trash-2" class="w-4 h-4"></i>
-                                    </button>
-                                </div>
-                            </div>
-                        `;
-                    });
-                }
-            } else {
-                studentsListHtml = `<p class="text-slate-500 text-sm italic col-span-full">Selecciona un grado para ver sus alumnos.</p>`;
-            }
-
-            const renderCatalogList = (sourceArray, searchState, selectedState, catType) => {
-                let html = '';
-                const q = (searchState || '').toLowerCase();
-                const filtered = sourceArray.filter(c => c.toLowerCase().includes(q));
-                
-                if (filtered.length === 0 && sourceArray.length > 0) {
-                    return `<p class="text-slate-500 text-sm italic col-span-full">No se encontraron coincidencias.</p>`;
-                }
-                filtered.forEach(item => {
-                    const isSelected = selectedState.includes(item);
-                    const color = catType === 'alimento' ? 'amber' : 'sky';
-                    html += `
-                        <div class="flex items-center justify-between bg-white border ${isSelected ? `border-${color}-400 bg-${color}-50/50` : 'border-slate-200'} p-2 rounded-lg shadow-sm transition-colors">
-                            <div class="flex items-center gap-2 flex-grow min-w-0">
-                                <input type="checkbox" onchange="window.app.toggleCatalogSelect('${catType}s', '${item.replace(/'/g, "\\'")}')" ${isSelected ? 'checked' : ''} class="w-4 h-4 text-${color}-600 rounded border-slate-300 focus:ring-${color}-500 cursor-pointer flex-shrink-0">
-                                <span class="font-medium text-slate-700 text-sm truncate w-full pr-2" title="${item}">${item}</span>
-                            </div>
-                            <div class="flex items-center flex-shrink-0">
-                                <button onclick="window.app.editAdminItem('${catType}', '${item.replace(/'/g, "\\'")}')" class="text-blue-500 hover:bg-blue-50 p-1 rounded-md transition-colors mr-1"><i data-lucide="pencil" class="w-4 h-4"></i></button>
-                                <button onclick="window.app.deleteAdminItem('${catType}', '${item.replace(/'/g, "\\'")}')" class="text-red-500 hover:bg-red-50 p-1 rounded-md transition-colors"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
-                            </div>
-                        </div>`;
-                });
-                return html;
-            };
-
-            const alimentosListHtml = renderCatalogList(state.adminData.alimentos, state.adminAlimentoSearch, state.adminSelectedAlimentos, 'alimento');
-            const bebidasListHtml = renderCatalogList(state.adminData.bebidas, state.adminBebidaSearch, state.adminSelectedBebidas, 'bebida');
-            
-            const isAllAlimentosSelected = state.adminData.alimentos.filter(c => c.toLowerCase().includes((state.adminAlimentoSearch||'').toLowerCase())).length > 0 && state.adminData.alimentos.filter(c => c.toLowerCase().includes((state.adminAlimentoSearch||'').toLowerCase())).every(c => state.adminSelectedAlimentos.includes(c));
-            const isAllBebidasSelected = state.adminData.bebidas.filter(c => c.toLowerCase().includes((state.adminBebidaSearch||'').toLowerCase())).length > 0 && state.adminData.bebidas.filter(c => c.toLowerCase().includes((state.adminBebidaSearch||'').toLowerCase())).every(c => state.adminSelectedBebidas.includes(c));
-
-            let reportCycleOptionsHtml = '';
-            state.cycles.forEach(c => { reportCycleOptionsHtml += `<option value="${c.id}" ${c.id === state.reportCycleId ? 'selected' : ''}>${c.name}</option>`; });
-            
-            const reportCycle = state.cycles.find(c => c.id === state.reportCycleId) || getActiveCycle();
-            let reportWeekOptionsHtml = '';
-            if (reportCycle && reportCycle.weeks) {
-                reportCycle.weeks.forEach(w => { reportWeekOptionsHtml += `<option value="${w.id}" ${w.id === state.reportWeekId ? 'selected' : ''}>${w.range}${w.status === 'active' ? ' (Activa)' : w.status === 'archived' ? ' (Archivada)' : ' (Planeada)'}</option>`; });
-            }
-
-            const totalStudentsCount = Object.values(state.adminData.students).reduce((sum, arr) => sum + arr.length, 0);
-            let reportRowsHtml = '';
-            let gt = { total: 0, noPid: 0, escuela: 0, casa: 0, pagado: 0, fiado: 0, beca: 0 };
-            
-            const reportWeek = reportCycle?.weeks?.find(w => w.id === state.reportWeekId);
-
-            if (reportWeek) {
-                DIAS_SEMANA.forEach(day => {
-                    const ordersDay = (reportWeek.orders || []).filter(o => o.dayFor === day);
-                    const t = ordersDay.length;
-                    const nop = totalStudentsCount > 0 ? (totalStudentsCount - t) : 0; 
-                    const esc = ordersDay.filter(o => o.source === 'Escuela').length;
-                    const cas = ordersDay.filter(o => o.source === 'Casa').length;
-                    const pag = ordersDay.filter(o => o.paymentStatus === 'Pagado').length;
-                    const fia = ordersDay.filter(o => o.paymentStatus === 'Fiado').length;
-                    const bec = ordersDay.filter(o => o.paymentStatus === 'Beca').length;
-
-                    gt.total += t; gt.noPid += nop; gt.escuela += esc; gt.casa += cas;
-                    gt.pagado += pag; gt.fiado += fia; gt.beca += bec;
-
-                    reportRowsHtml += `
-                        <tr class="border-b border-slate-100 hover:bg-slate-50 transition-colors">
-                            <td class="p-3 font-semibold text-slate-700">${day}</td>
-                            <td class="p-3 text-center font-bold text-blue-600">${t}</td>
-                            <td class="p-3 text-center text-slate-500">${nop}</td>
-                            <td class="p-3 text-center">${esc}</td>
-                            <td class="p-3 text-center">${cas}</td>
-                            <td class="p-3 text-center text-emerald-600">${pag}</td>
-                            <td class="p-3 text-center text-amber-600">${fia}</td>
-                            <td class="p-3 text-center text-purple-600">${bec}</td>
-                        </tr>
-                    `;
-                });
-                reportRowsHtml += `
-                    <tr class="bg-slate-100/50 font-bold text-slate-800 border-t-2 border-slate-200">
-                        <td class="p-3">TOTAL SEMANA</td>
-                        <td class="p-3 text-center text-blue-700 text-lg">${gt.total}</td>
-                        <td class="p-3 text-center text-slate-500">${gt.noPid}</td>
-                        <td class="p-3 text-center">${gt.escuela}</td>
-                        <td class="p-3 text-center">${gt.casa}</td>
-                        <td class="p-3 text-center text-emerald-700">${gt.pagado}</td>
-                        <td class="p-3 text-center text-amber-700">${gt.fiado}</td>
-                        <td class="p-3 text-center text-purple-700">${gt.beca}</td>
-                    </tr>
-                `;
-            } else {
-                reportRowsHtml = `<tr><td colspan="8" class="p-4 text-center text-slate-500 italic">No hay datos de semanas para este ciclo.</td></tr>`;
-            }
-
-            let adminDaysHtml = '';
-            DIAS_SEMANA.forEach(d => {
-                const isActive = d === state.adminOrderDay;
-                const btnClass = isActive ? 'bg-indigo-600 text-white shadow-md' : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200';
-                adminDaysHtml += `<button onclick="window.app.setAdminOrderDay('${d}')" class="px-3 py-1.5 rounded-lg text-sm font-bold transition-colors ${btnClass}">${d}</button>`;
-            });
-
-            let adminGradesOptionsHtml = `<option value="Todos">Todos los grados</option>`;
-            state.adminData.grades.forEach(g => {
-                adminGradesOptionsHtml += `<option value="${g}" ${state.adminOrderGrade === g ? 'selected' : ''}>${g}</option>`;
-            });
-
-            let adminOrdersHtml = '';
-            if (reportWeek) {
-                let adminFilteredOrders = (reportWeek.orders || []).filter(o => o.dayFor === state.adminOrderDay);
-                if (state.adminOrderGrade !== 'Todos') {
-                    adminFilteredOrders = adminFilteredOrders.filter(o => o.grade === state.adminOrderGrade);
-                }
-
-                if (adminFilteredOrders.length === 0) {
-                    adminOrdersHtml = `<p class="text-slate-500 italic text-center py-4">No hay pedidos registrados con estos filtros.</p>`;
-                } else {
-                    adminFilteredOrders.forEach(o => {
-                        adminOrdersHtml += `
-                            <div class="flex justify-between items-center text-slate-800 bg-white p-3 rounded-lg border border-slate-200 shadow-sm transition-all hover:border-slate-300">
-                                <div class="flex flex-col sm:flex-row sm:items-center gap-2 flex-wrap">
-                                    <span class="font-bold text-sm w-12 text-slate-400">${o.grade}</span>
-                                    <span class="font-bold">${o.studentName}</span> 
-                                    <span class="text-blue-700 bg-blue-100/50 px-2 py-0.5 rounded text-xs font-medium w-fit">${o.breakfastType}</span>
-                                    ${window.app.getPaymentBadge(o.paymentStatus)}
-                                    <span class="text-[10px] uppercase font-bold tracking-wider text-slate-500 border border-slate-200 px-1.5 rounded">${o.source}</span>
-                                </div>
-                                <div class="flex items-center gap-1 ml-2 flex-shrink-0">
-                                    <button type="button" onclick="window.app.editOrder('${o.id}', 'Admin')" class="text-blue-500 hover:bg-blue-100 p-1.5 rounded-md transition-colors" title="Editar Pedido">
-                                        <i data-lucide="pencil" class="w-4 h-4"></i>
-                                    </button>
-                                    <button type="button" onclick="window.app.deleteOrder('${o.id}', 'Admin')" class="text-red-500 hover:bg-red-100 p-1.5 rounded-md transition-colors" title="Eliminar Pedido">
-                                        <i data-lucide="trash-2" class="w-4 h-4"></i>
-                                    </button>
-                                </div>
-                            </div>
-                        `;
-                    });
-                }
-            } else {
-                adminOrdersHtml = `<p class="text-slate-500 italic text-center py-4">Selecciona una semana arriba en el Reporte de Ventas.</p>`;
-            }
-
-            let studentAddFormHtml = '';
-            if (state.adminStudentAddMode === 'masivo') {
-                studentAddFormHtml = `
-                    <form onsubmit="window.app.addAdminItem(event, 'student')" class="flex flex-col gap-2">
-                        <textarea id="new-student-input" rows="3" placeholder="Pega el listado (Ej: AICP141015MSLDRTA7 ADRIANO/CORONA*PATRICIA ISABEL)" class="flex-grow bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 resize-none font-mono text-xs" required ${!state.adminSelectedGrade ? 'disabled' : ''}></textarea>
-                        <button type="submit" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50" ${!state.adminSelectedGrade ? 'disabled' : ''}>Añadir Masivamente</button>
-                    </form>
-                `;
-            } else {
-                studentAddFormHtml = `
-                    <form onsubmit="window.app.addSingleStudent(event)" class="flex flex-col gap-2">
-                        <input type="text" id="ind-nombre" placeholder="Nombre completo" class="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-emerald-500" required ${!state.adminSelectedGrade ? 'disabled' : ''}>
-                        <div class="flex gap-2">
-                            <input type="text" id="ind-curp" placeholder="CURP (Opcional)" oninput="document.getElementById('ind-pwd').value = this.value.substring(0,10)" class="w-1/2 bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-emerald-500" ${!state.adminSelectedGrade ? 'disabled' : ''}>
-                            <input type="text" id="ind-pwd" placeholder="Contraseña (Auto)" class="w-1/2 bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-emerald-500" required ${!state.adminSelectedGrade ? 'disabled' : ''}>
+                    ${state.adminSelectedGrade ? `
+                        <div class="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
+                            <h5 class="font-bold text-slate-900 mb-4">Alumnos del grado ${state.adminSelectedGrade}</h5>
+                            <p class="text-slate-500 text-sm">La gestión de alumnos está disponible. Usa los botones para editar o eliminar.</p>
                         </div>
-                        <button type="submit" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors disabled:opacity-50" ${!state.adminSelectedGrade ? 'disabled' : ''}>Añadir Alumno</button>
-                    </form>
-                `;
-            }
+                    ` : '<div class="text-center py-12 text-slate-500">Selecciona un grado para comenzar</div>'}
+                </div>
+            `;
+        }
 
-            const sched = state.adminData.settings?.homeOrderSchedule || { mode: 'always', days: [1,2,3,4,5], start: '07:00', end: '16:00' };
-            const daysObj = [
-                { id: 1, name: 'L' }, { id: 2, name: 'M' }, { id: 3, name: 'M' },
-                { id: 4, name: 'J' }, { id: 5, name: 'V' }, { id: 6, name: 'S' }, { id: 0, name: 'D' }
-            ];
-
-            let scheduleHtml = `
-                <div>
-                    <h5 class="text-xs font-bold text-slate-500 mb-3 uppercase tracking-wider border-b border-slate-100 pb-2">Horario Pedidos (Casa)</h5>
-                    <div class="space-y-3">
-                        <div class="flex flex-col sm:flex-row sm:items-center gap-3">
-                            <label class="flex items-center gap-2 cursor-pointer text-sm text-slate-700 bg-slate-50 px-3 py-2 rounded-lg border border-slate-200 hover:bg-blue-50 w-full sm:w-auto">
-                                <input type="radio" name="sched_mode" value="always" ${sched.mode === 'always' ? 'checked' : ''} onchange="window.app.updateScheduleMode(this.value)" class="w-4 h-4 text-blue-600">
-                                Siempre Abierto
-                            </label>
-                            <label class="flex items-center gap-2 cursor-pointer text-sm text-slate-700 bg-slate-50 px-3 py-2 rounded-lg border border-slate-200 hover:bg-blue-50 w-full sm:w-auto">
-                                <input type="radio" name="sched_mode" value="scheduled" ${sched.mode === 'scheduled' ? 'checked' : ''} onchange="window.app.updateScheduleMode(this.value)" class="w-4 h-4 text-blue-600">
-                                Restringido
-                            </label>
+        function renderAdminTabAlimentosYBebidas() {
+            return `
+                <div class="space-y-6">
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                        <div class="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
+                            <h4 class="font-bold text-slate-900 mb-4 flex items-center gap-2"><i data-lucide="pizza" class="w-5 h-5 text-amber-500"></i> Alimentos</h4>
+                            <form onsubmit="window.app.addAdminItem(event, 'alimento')" class="flex flex-col gap-2 mb-4">
+                                <textarea id="new-alimento-input" rows="3" placeholder="Ej. Torta, Sándwich (separa con comas)" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 text-sm outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 resize-none" required></textarea>
+                                <button type="submit" class="w-full bg-amber-600 hover:bg-amber-700 text-white py-3 rounded-lg font-semibold transition-colors">Añadir Alimentos</button>
+                            </form>
+                            <div class="text-center py-4 text-slate-500 text-sm">Gestión de alimentos disponible</div>
                         </div>
-                        
-                        <div class="${sched.mode === 'scheduled' ? 'block' : 'hidden'} bg-blue-50/50 p-4 rounded-xl border border-blue-100">
-                            <p class="text-xs font-bold text-slate-600 mb-2">Días Activos:</p>
-                            <div class="flex flex-wrap gap-1.5 mb-4">
-                                ${daysObj.map(d => `
-                                    <label class="flex items-center gap-1 bg-white px-2.5 py-1.5 rounded-lg border border-slate-200 cursor-pointer text-xs font-semibold shadow-sm hover:border-blue-300">
-                                        <input type="checkbox" onchange="window.app.toggleScheduleDay(${d.id})" ${sched.days.includes(d.id) ? 'checked' : ''} class="w-3.5 h-3.5 text-blue-600 rounded">
-                                        ${d.name}
-                                    </label>
-                                `).join('')}
-                            </div>
-                            <p class="text-xs font-bold text-slate-600 mb-2">Rango de Horas:</p>
-                            <div class="flex items-center gap-3">
-                                <div class="flex-1">
-                                    <input type="time" id="sched_start" value="${sched.start}" onchange="window.app.saveScheduleTime()" class="border border-slate-300 rounded-lg px-3 py-2 text-sm w-full outline-none focus:border-blue-500 bg-white shadow-sm">
-                                </div>
-                                <span class="text-slate-400 font-bold">-</span>
-                                <div class="flex-1">
-                                    <input type="time" id="sched_end" value="${sched.end}" onchange="window.app.saveScheduleTime()" class="border border-slate-300 rounded-lg px-3 py-2 text-sm w-full outline-none focus:border-blue-500 bg-white shadow-sm">
-                                </div>
-                            </div>
+
+                        <div class="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
+                            <h4 class="font-bold text-slate-900 mb-4 flex items-center gap-2"><i data-lucide="cup-soda" class="w-5 h-5 text-sky-500"></i> Bebidas</h4>
+                            <form onsubmit="window.app.addAdminItem(event, 'bebida')" class="flex flex-col gap-2 mb-4">
+                                <textarea id="new-bebida-input" rows="3" placeholder="Ej. Jugo de Naranja, Leche con Chocolate (separa con comas)" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 text-sm outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 resize-none" required></textarea>
+                                <button type="submit" class="w-full bg-sky-600 hover:bg-sky-700 text-white py-3 rounded-lg font-semibold transition-colors">Añadir Bebidas</button>
+                            </form>
+                            <div class="text-center py-4 text-slate-500 text-sm">Gestión de bebidas disponible</div>
                         </div>
                     </div>
                 </div>
             `;
+        }
 
+        function renderAdminTabReporte() {
             return `
-                <div class="space-y-8 animate-in fade-in duration-300">
-                    <div class="border-b border-slate-100 pb-4">
-                        <h3 class="font-bold text-2xl text-slate-900 flex items-center gap-2">
-                            <i data-lucide="database" class="w-6 h-6 text-slate-600"></i> Administración del Sistema
-                        </h3>
-                        <p class="text-slate-500 text-sm mt-1">Gestiona ciclos, catálogos, reportes y accesos.</p>
+                <div class="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+                    <h4 class="font-bold text-slate-900 mb-4">Reporte de Ventas</h4>
+                    <p class="text-slate-600 mb-4">Aquí se mostrará el reporte detallado de ventas por día, grado, fuente y estatus de pago.</p>
+                    <div class="bg-slate-50 p-8 rounded-lg text-center text-slate-500">
+                        <i data-lucide="chart-bar" class="w-12 h-12 mx-auto mb-2 text-slate-300"></i>
+                        Reporte de ventas
                     </div>
+                </div>
+            `;
+        }
 
-                    <div class="bg-indigo-50 p-5 rounded-2xl border border-indigo-100 flex flex-col shadow-sm">
-                        <h4 class="font-semibold text-indigo-900 mb-4 flex items-center gap-2"><i data-lucide="calendar-days" class="w-5 h-5 text-indigo-600"></i> Planificación de Ciclos y Semanas</h4>
-                        
-                        <div class="flex flex-col md:flex-row gap-6">
-                            <div class="flex flex-col gap-1 w-full md:w-1/2">
-                                <label class="text-xs font-bold text-indigo-400 uppercase tracking-wider">Ciclo Escolar</label>
-                                <div class="flex items-center bg-white border border-indigo-200 rounded-lg shadow-sm">
-                                    <select onchange="window.app.setManagingCycle(this.value)" class="bg-transparent text-slate-700 text-sm font-semibold px-3 py-2 outline-none cursor-pointer appearance-none pr-8 relative w-full" style="background-image: url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%231e293b%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E'); background-repeat: no-repeat; background-position: right 0.7rem top 50%; background-size: 0.65rem auto;">
-                                        ${cycleOptionsHtml}
-                                    </select>
-                                    <div class="flex items-center border-l border-indigo-100">
-                                        <button onclick="window.app.editManagingCycle()" class="p-2 text-blue-600 hover:bg-blue-50 transition-colors" title="Editar Ciclo"><i data-lucide="pencil" class="w-4 h-4"></i></button>
-                                        <button onclick="window.app.deleteManagingCycle()" class="p-2 text-red-600 hover:bg-red-50 transition-colors" title="Eliminar Ciclo"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
-                                        <button onclick="window.app.createNewCycle()" class="p-2 text-emerald-600 hover:bg-emerald-50 rounded-r-lg transition-colors" title="Nuevo Ciclo"><i data-lucide="plus-circle" class="w-4 h-4"></i></button>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="flex flex-col gap-1 w-full md:w-1/2 ${!managingCycle || managingCycle.weeks.length === 0 ? 'opacity-50 pointer-events-none' : ''}">
-                                <label class="text-xs font-bold text-indigo-400 uppercase tracking-wider">Semana</label>
-                                <div class="flex items-center bg-white border border-indigo-200 rounded-lg shadow-sm">
-                                    <select onchange="window.app.setManagingWeek(this.value)" class="bg-transparent text-slate-700 text-sm font-semibold px-3 py-2 outline-none cursor-pointer appearance-none pr-8 relative w-full" style="background-image: url('data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%231e293b%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E'); background-repeat: no-repeat; background-position: right 0.7rem top 50%; background-size: 0.65rem auto;">
-                                        ${weekOptionsHtml}
-                                    </select>
-                                    <div class="flex items-center border-l border-indigo-100">
-                                        <button onclick="window.app.editManagingWeek()" class="p-2 text-blue-600 hover:bg-blue-50 transition-colors" title="Editar Semana"><i data-lucide="pencil" class="w-4 h-4"></i></button>
-                                        <button onclick="window.app.deleteManagingWeek()" class="p-2 text-red-600 hover:bg-red-50 transition-colors" title="Eliminar Semana"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
-                                        <button onclick="window.app.createNewWeek()" class="p-2 text-indigo-600 hover:bg-indigo-50 rounded-r-lg transition-colors" title="Nueva Semana"><i data-lucide="plus-square" class="w-4 h-4"></i></button>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="bg-slate-50 p-5 rounded-2xl border border-slate-100 flex flex-col mb-4 shadow-sm">
-                        <h4 class="font-semibold text-slate-800 mb-4 flex items-center gap-2"><i data-lucide="graduation-cap" class="w-5 h-5 text-blue-500"></i> Grados</h4>
-                        <form onsubmit="window.app.addAdminItem(event, 'grade')" class="flex gap-2 mb-4 w-full md:w-1/2">
-                            <input type="text" id="new-grade-input" placeholder="Ej. 1A" class="flex-grow bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500" required>
-                            <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-sm font-semibold transition-colors">Añadir</button>
-                        </form>
-                        <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2 max-h-40 overflow-y-auto custom-scrollbar pr-1">
-                            ${gradesListHtml}
-                        </div>
-                    </div>
-
-                    <div class="bg-slate-50 p-5 rounded-2xl border border-slate-100 flex flex-col shadow-sm">
-                        <div class="flex items-center justify-between mb-4">
-                            <h4 class="font-semibold text-slate-800 flex items-center gap-2"><i data-lucide="users" class="w-5 h-5 text-emerald-500"></i> Alumnos</h4>
-                            ${state.adminSelectedStudents.length > 0 ? `<button onclick="window.app.deleteSelectedStudents()" class="text-xs font-bold text-red-600 bg-red-100 hover:bg-red-200 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1"><i data-lucide="trash-2" class="w-3 h-3"></i> Eliminar (${state.adminSelectedStudents.length})</button>` : ''}
-                        </div>
-                        
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-4">
-                            <div>
-                                <select onchange="window.app.adminSelectGrade(this.value)" class="w-full bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 appearance-none font-medium mb-3">
-                                    ${gradesOptionsHtml}
-                                </select>
-                                <div class="flex bg-slate-200 p-1 rounded-lg w-full mb-3">
-                                    <button onclick="window.app.setStudentAddMode('masivo')" class="${state.adminStudentAddMode === 'masivo' ? 'bg-white shadow text-emerald-700' : 'text-slate-500 hover:text-slate-700'} flex-1 px-3 py-1.5 rounded text-xs font-bold transition-all">Masivo CURP</button>
-                                    <button onclick="window.app.setStudentAddMode('individual')" class="${state.adminStudentAddMode === 'individual' ? 'bg-white shadow text-emerald-700' : 'text-slate-500 hover:text-slate-700'} flex-1 px-3 py-1.5 rounded text-xs font-bold transition-all">Individual</button>
-                                </div>
-                                ${studentAddFormHtml}
-                            </div>
-                            
-                            <div class="flex flex-col h-full border border-slate-200 rounded-xl bg-slate-50/50">
-                                <div class="flex items-center gap-2 p-2 border-b border-slate-200">
-                                    <div class="relative flex-grow">
-                                        <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-2.5"></i>
-                                        <input type="text" oninput="window.app.setSearch('student', this.value)" value="${state.adminStudentSearch || ''}" placeholder="Buscar alumno..." class="w-full bg-white border border-slate-200 rounded-md pl-9 pr-3 py-1.5 text-sm outline-none focus:border-emerald-500" ${!state.adminSelectedGrade ? 'disabled' : ''}>
-                                    </div>
-                                    <label class="flex items-center gap-1.5 text-xs text-slate-600 bg-white px-2 py-1.5 rounded-md cursor-pointer hover:bg-slate-100 transition-colors border border-slate-200 ${!state.adminSelectedGrade ? 'opacity-50 pointer-events-none' : ''}">
-                                        <input type="checkbox" onchange="window.app.toggleAllStudents(this.checked)" ${isAllStudentsSelected ? 'checked' : ''} class="w-3.5 h-3.5 text-emerald-600 rounded border-slate-300"> Todos
-                                    </label>
-                                </div>
-                                <div class="flex-grow p-2 overflow-y-auto max-h-60 custom-scrollbar space-y-1.5">
-                                    ${studentsListHtml}
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                        <div class="bg-slate-50 p-5 rounded-2xl border border-slate-100 flex flex-col shadow-sm">
-                            <div class="flex items-center justify-between mb-4">
-                                <h4 class="font-semibold text-slate-800 flex items-center gap-2"><i data-lucide="pizza" class="w-5 h-5 text-amber-500"></i> Alimentos</h4>
-                                ${state.adminSelectedAlimentos.length > 0 ? `<button onclick="window.app.deleteSelectedCatalog('alimentos')" class="text-xs font-bold text-red-600 bg-red-100 hover:bg-red-200 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1"><i data-lucide="trash-2" class="w-3 h-3"></i> Eliminar (${state.adminSelectedAlimentos.length})</button>` : ''}
-                            </div>
-                            <form onsubmit="window.app.addAdminItem(event, 'alimento')" class="flex flex-col gap-2 mb-4">
-                                <textarea id="new-alimento-input" rows="2" placeholder="Ej. Torta (separa con comas para añadir varios)" class="flex-grow bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 resize-none" required></textarea>
-                                <button type="submit" class="bg-amber-600 hover:bg-amber-700 text-white w-full py-2 rounded-lg text-sm font-semibold transition-colors">Añadir Alimento</button>
-                            </form>
-                            <div class="flex flex-col sm:flex-row gap-2 mb-2 pt-2 border-t border-slate-200">
-                                <div class="relative flex-grow">
-                                    <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-2.5"></i>
-                                    <input type="text" oninput="window.app.setSearch('alimento', this.value)" value="${state.adminAlimentoSearch || ''}" placeholder="Buscar alimento..." class="w-full bg-white border border-slate-200 rounded-lg pl-9 pr-3 py-2 text-sm outline-none focus:border-amber-500">
-                                </div>
-                                <label class="flex items-center gap-2 text-sm text-slate-600 bg-slate-100 px-3 py-2 rounded-lg cursor-pointer hover:bg-slate-200 border border-slate-200"><input type="checkbox" onchange="window.app.toggleAllCatalog('alimentos', this.checked)" ${isAllAlimentosSelected ? 'checked' : ''} class="w-4 h-4 text-amber-600 rounded"> Sel. Todo</label>
-                            </div>
-                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 flex-grow max-h-60 overflow-y-auto custom-scrollbar pr-1 content-start">${alimentosListHtml}</div>
-                        </div>
-
-                        <div class="bg-slate-50 p-5 rounded-2xl border border-slate-100 flex flex-col shadow-sm">
-                            <div class="flex items-center justify-between mb-4">
-                                <h4 class="font-semibold text-slate-800 flex items-center gap-2"><i data-lucide="cup-soda" class="w-5 h-5 text-sky-500"></i> Bebidas</h4>
-                                ${state.adminSelectedBebidas.length > 0 ? `<button onclick="window.app.deleteSelectedCatalog('bebidas')" class="text-xs font-bold text-red-600 bg-red-100 hover:bg-red-200 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1"><i data-lucide="trash-2" class="w-3 h-3"></i> Eliminar (${state.adminSelectedBebidas.length})</button>` : ''}
-                            </div>
-                            <form onsubmit="window.app.addAdminItem(event, 'bebida')" class="flex flex-col gap-2 mb-4">
-                                <textarea id="new-bebida-input" rows="2" placeholder="Ej. Jugo (separa con comas para añadir varios)" class="flex-grow bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 resize-none" required></textarea>
-                                <button type="submit" class="bg-sky-600 hover:bg-sky-700 text-white w-full py-2 rounded-lg text-sm font-semibold transition-colors">Añadir Bebida</button>
-                            </form>
-                            <div class="flex flex-col sm:flex-row gap-2 mb-2 pt-2 border-t border-slate-200">
-                                <div class="relative flex-grow">
-                                    <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-2.5"></i>
-                                    <input type="text" oninput="window.app.setSearch('bebida', this.value)" value="${state.adminBebidaSearch || ''}" placeholder="Buscar bebida..." class="w-full bg-white border border-slate-200 rounded-lg pl-9 pr-3 py-2 text-sm outline-none focus:border-sky-500">
-                                </div>
-                                <label class="flex items-center gap-2 text-sm text-slate-600 bg-slate-100 px-3 py-2 rounded-lg cursor-pointer hover:bg-slate-200 border border-slate-200"><input type="checkbox" onchange="window.app.toggleAllCatalog('bebidas', this.checked)" ${isAllBebidasSelected ? 'checked' : ''} class="w-4 h-4 text-sky-600 rounded"> Sel. Todo</label>
-                            </div>
-                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 flex-grow max-h-60 overflow-y-auto custom-scrollbar pr-1 content-start">${bebidasListHtml}</div>
-                        </div>
-                    </div>
-
-                    <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-                        <div class="flex flex-col sm:flex-row sm:items-center justify-between mb-6 gap-4 border-b border-slate-100 pb-4">
-                            <h4 class="font-semibold text-slate-800 flex items-center gap-2 text-xl"><i data-lucide="bar-chart-3" class="w-6 h-6 text-indigo-500"></i> Reporte de Ventas</h4>
-                            <div class="flex gap-2">
-                                <select onchange="window.app.setReportCycle(this.value)" class="bg-slate-50 border border-slate-300 text-slate-700 text-sm font-semibold rounded-lg px-4 py-2 outline-none cursor-pointer shadow-sm">${reportCycleOptionsHtml}</select>
-                                <select onchange="window.app.setReportWeek(this.value)" class="bg-slate-50 border border-slate-300 text-slate-700 text-sm font-semibold rounded-lg px-4 py-2 outline-none cursor-pointer shadow-sm">${reportWeekOptionsHtml}</select>
-                            </div>
-                        </div>
-                        <div class="overflow-x-auto custom-scrollbar pb-2">
-                            <table class="w-full text-left border-collapse min-w-[700px]">
-                                <thead>
-                                    <tr class="bg-slate-50 text-slate-600 text-xs uppercase tracking-wider border-b border-slate-200">
-                                        <th class="p-3 rounded-tl-lg">Día</th>
-                                        <th class="p-3 text-center text-blue-700 bg-blue-50/50">Total Pedidos</th>
-                                        <th class="p-3 text-center">Faltaron</th>
-                                        <th class="p-3 text-center border-l border-slate-200">En Escuela</th>
-                                        <th class="p-3 text-center border-r border-slate-200">En Casa</th>
-                                        <th class="p-3 text-center text-emerald-700 bg-emerald-50/50">Pagado</th>
-                                        <th class="p-3 text-center text-amber-700 bg-amber-50/50">Fiado</th>
-                                        <th class="p-3 text-center text-purple-700 bg-purple-50/50 rounded-tr-lg">Beca</th>
-                                    </tr>
-                                </thead>
-                                <tbody class="text-sm">${reportRowsHtml}</tbody>
-                            </table>
-                        </div>
-                    </div>
-
-                    <div class="bg-indigo-50 p-6 rounded-2xl border border-indigo-200 shadow-sm">
-                        <div class="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-4">
-                            <div>
-                                <h4 class="font-bold text-indigo-900 flex items-center gap-2 text-xl"><i data-lucide="list-collapse" class="w-6 h-6 text-indigo-600"></i> Gestor General de Pedidos</h4>
-                                <p class="text-sm text-indigo-700 mt-1">Busca, edita o elimina los pedidos de cualquier grado realizados en la semana mostrada en el Reporte superior.</p>
-                            </div>
-                        </div>
-
-                        <div class="flex flex-col md:flex-row gap-4 mb-4 bg-white/60 p-3 rounded-xl border border-indigo-100">
-                            <div class="flex flex-wrap gap-2 items-center">
-                                <span class="text-sm font-semibold text-slate-500 mx-2 hidden sm:block">Día:</span>
-                                ${adminDaysHtml}
-                            </div>
-                            <div class="flex flex-wrap gap-2 items-center md:border-l border-slate-200 md:pl-4">
-                                <span class="text-sm font-semibold text-slate-500 mx-2 hidden sm:block">Grado:</span>
-                                <select onchange="window.app.setAdminOrderGrade(this.value)" class="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-sm outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 appearance-none font-medium">
-                                    ${adminGradesOptionsHtml}
-                                </select>
-                            </div>
-                        </div>
-
-                        <div class="space-y-2 max-h-96 overflow-y-auto custom-scrollbar pr-2">
-                            ${adminOrdersHtml}
-                        </div>
-                    </div>
-
-                    <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-                        <h4 class="font-semibold text-slate-800 mb-6 flex items-center gap-2 text-xl">
-                            <i data-lucide="shield-check" class="w-6 h-6 text-slate-500"></i> Configuración General y Accesos
-                        </h4>
-                        
-                        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                            <div>
-                                <h5 class="text-xs font-bold text-slate-500 mb-3 uppercase tracking-wider border-b border-slate-100 pb-2">Contacto de Ventas (Para Padres)</h5>
-                                <form onsubmit="window.app.saveContactInfo(event)" class="space-y-4">
-                                    <div>
-                                        <label class="block text-sm font-semibold text-slate-700 mb-1">Nombre del Responsable</label>
-                                        <input type="text" id="contact-name" value="${state.adminData.contactInfo.name || ''}" placeholder="Ej. Patricia Corona" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 outline-none focus:border-blue-500 transition-all text-slate-700">
-                                    </div>
-                                    <div>
-                                        <label class="block text-sm font-semibold text-slate-700 mb-1">Teléfono</label>
-                                        <input type="text" id="contact-phone" value="${state.adminData.contactInfo.phone || ''}" placeholder="Ej. 555-123-4567" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 outline-none focus:border-blue-500 transition-all text-slate-700">
-                                    </div>
-                                    <div class="text-right pt-2">
-                                        <button type="submit" class="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-lg text-sm font-semibold transition-colors shadow-sm">Guardar Contacto</button>
-                                    </div>
-                                </form>
-                            </div>
-
-                            <div>
-                                <h5 class="text-xs font-bold text-slate-500 mb-3 uppercase tracking-wider border-b border-slate-100 pb-2">Contraseñas del Personal</h5>
-                                <p class="text-[11px] text-slate-400 mb-3 leading-tight">Si lo dejas en blanco, no se pedirá contraseña para esa sección.</p>
-                                <form onsubmit="window.app.savePasswords(event)" class="space-y-4">
-                                    <div><label class="block text-sm font-semibold text-slate-700 mb-1">Administración</label><input type="text" id="pwd-admin" value="${state.adminData.passwords.admin || ''}" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 outline-none focus:border-slate-500"></div>
-                                    <div><label class="block text-sm font-semibold text-slate-700 mb-1">Cocina</label><input type="text" id="pwd-cocina" value="${state.adminData.passwords.cocina || ''}" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 outline-none focus:border-slate-500"></div>
-                                    <div><label class="block text-sm font-semibold text-slate-700 mb-1">Gestión Escolar</label><input type="text" id="pwd-escuela" value="${state.adminData.passwords.escuela || ''}" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 outline-none focus:border-slate-500"></div>
-                                    <div class="text-right pt-2"><button type="submit" class="bg-slate-800 hover:bg-slate-900 text-white px-5 py-2 rounded-lg text-sm font-semibold transition-colors shadow-sm">Guardar Claves</button></div>
-                                </form>
-                            </div>
-
-                            ${scheduleHtml}
-                        </div>
+        function renderAdminTabPedidos() {
+            return `
+                <div class="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
+                    <h4 class="font-bold text-slate-900 mb-4">Gestor General de Pedidos</h4>
+                    <p class="text-slate-600 mb-4">Busca, edita o elimina pedidos de cualquier grado y día.</p>
+                    <div class="bg-slate-50 p-8 rounded-lg text-center text-slate-500">
+                        <i data-lucide="list-check" class="w-12 h-12 mx-auto mb-2 text-slate-300"></i>
+                        Gestor de pedidos
                     </div>
                 </div>
             `;
@@ -1477,6 +1336,84 @@
         }
 
         window.app = {
+            openModal: (modalName) => {
+                state.activeModal = modalName;
+                renderView();
+            },
+
+            closeModal: () => {
+                state.activeModal = null;
+                renderView();
+            },
+
+            submitCreateCycle: (e) => {
+                e.preventDefault();
+                const name = document.getElementById('modal-cycle-name').value.trim();
+                if (!name) return;
+                const fullData = getFullLocalData();
+                const newCycle = { id: 'cycle_' + Date.now(), name: name, weeks: [], activeWeekId: null };
+                fullData.cycles.push(newCycle);
+                saveFullLocalData(fullData); loadLocalData();
+                state.managingCycleId = newCycle.id;
+                state.managingWeekId = null;
+                state.draftMenu = JSON.parse(JSON.stringify(MENU_POR_DEFECTO));
+                state.draftInactiveDays = [];
+                state.activeModal = null;
+                renderView();
+            },
+
+            submitEditCycle: (e) => {
+                e.preventDefault();
+                const newName = document.getElementById('modal-cycle-edit-name').value.trim();
+                const cycle = state.cycles.find(c => c.id === state.managingCycleId);
+                if(!cycle || !newName || newName === cycle.name) return;
+                const fullData = getFullLocalData();
+                const target = fullData.cycles.find(c => c.id === state.managingCycleId);
+                if(target) { 
+                    target.name = newName; 
+                    saveFullLocalData(fullData); 
+                    loadLocalData(); 
+                    state.activeModal = null;
+                    renderView(); 
+                }
+            },
+
+            submitCreateWeek: (e) => {
+                e.preventDefault();
+                const range = document.getElementById('modal-week-range').value.trim();
+                if (!range) return;
+                const fullData = getFullLocalData();
+                const cycle = fullData.cycles.find(c => c.id === state.managingCycleId);
+                if(!cycle) return;
+                const newWeek = { id: 'week_' + Date.now(), range: range, menu: JSON.parse(JSON.stringify(MENU_POR_DEFECTO)), orders: [], inactiveDays: [], status: 'active' };
+                cycle.weeks.push(newWeek);
+                if (!cycle.activeWeekId) cycle.activeWeekId = newWeek.id;
+                saveFullLocalData(fullData); loadLocalData();
+                state.managingWeekId = newWeek.id;
+                state.draftMenu = JSON.parse(JSON.stringify(newWeek.menu));
+                state.draftInactiveDays = [];
+                state.activeModal = null;
+                renderView();
+            },
+
+            submitEditWeek: (e) => {
+                e.preventDefault();
+                const newRange = document.getElementById('modal-week-edit-range').value.trim();
+                const cycle = getManagingCycle();
+                const week = cycle ? cycle.weeks.find(w => w.id === state.managingWeekId) : null;
+                if(!week || !newRange || newRange === week.range) return;
+                const fullData = getFullLocalData();
+                const targetCycle = fullData.cycles.find(c => c.id === state.managingCycleId);
+                const targetWeek = targetCycle ? targetCycle.weeks.find(w => w.id === state.managingWeekId) : null;
+                if(targetWeek) { 
+                    targetWeek.range = newRange; 
+                    saveFullLocalData(fullData); 
+                    loadLocalData(); 
+                    state.activeModal = null;
+                    renderView(); 
+                }
+            },
+
             checkHomeOrderSchedule: () => {
                 const sched = state.adminData?.settings?.homeOrderSchedule;
                 if (!sched || sched.mode === 'always') return { open: true };
@@ -1532,15 +1469,27 @@
                 if(targetView !== 'home' && targetView !== 'casa') {
                     const requiredPwd = state.adminData.passwords[targetView];
                     if (requiredPwd && requiredPwd.trim() !== '') {
-                        const userPwd = prompt(`Ingresa la contraseña para acceder a esta sección:`);
-                        if (userPwd === null) return; 
-                        if (userPwd !== requiredPwd) {
-                            alert("Contraseña incorrecta.");
-                            return;
-                        }
+                        state.pendingLoginView = targetView;
+                        window.app.setView(`login-${targetView}`);
+                        return;
                     }
                 }
                 window.app.setView(targetView);
+            },
+
+            validateLogin: (e, section) => {
+                e.preventDefault();
+                const pwd = document.getElementById('login-password').value.trim();
+                const requiredPwd = state.adminData.passwords[section];
+                
+                if (pwd === requiredPwd) {
+                    state.pendingLoginView = null;
+                    window.app.setView(section);
+                } else {
+                    alert("❌ Contraseña incorrecta. Intenta de nuevo.");
+                    document.getElementById('login-password').value = '';
+                    document.getElementById('login-password').focus();
+                }
             },
 
             setView: (view) => {
@@ -1597,6 +1546,7 @@
             setReportWeek: (weekId) => { state.reportWeekId = weekId; renderView(); },
             setAdminOrderDay: (day) => { state.adminOrderDay = day; renderView(); },
             setAdminOrderGrade: (grade) => { state.adminOrderGrade = grade; renderView(); },
+            setAdminTab: (tab) => { state.adminTab = tab; renderView(); },
 
             setManagingCycle: (cycleId) => {
                 state.managingCycleId = cycleId;
@@ -1610,29 +1560,13 @@
             },
 
             createNewCycle: () => {
-                const name = prompt("Ingresa el nombre del nuevo Ciclo Escolar (ej. Ciclo 2026-2027):");
-                if (!name || name.trim() === '') return;
-                const fullData = getFullLocalData();
-                const newCycle = { id: 'cycle_' + Date.now(), name: name.trim(), weeks: [], activeWeekId: null };
-                fullData.cycles.push(newCycle);
-                saveFullLocalData(fullData); loadLocalData();
-                state.managingCycleId = newCycle.id;
-                state.managingWeekId = null;
-                state.draftMenu = JSON.parse(JSON.stringify(MENU_POR_DEFECTO));
-                state.draftInactiveDays = [];
-                alert(`¡Ciclo "${newCycle.name}" creado exitosamente! Crea una nueva semana para empezar a trabajar.`);
-                renderView();
+                window.app.openModal('create-cycle');
             },
 
             editManagingCycle: () => {
                 const cycle = state.cycles.find(c => c.id === state.managingCycleId);
                 if(!cycle) return;
-                const newName = prompt("Editar nombre del ciclo:", cycle.name);
-                if(newName && newName.trim() !== '' && newName.trim() !== cycle.name) {
-                    const fullData = getFullLocalData();
-                    const target = fullData.cycles.find(c => c.id === state.managingCycleId);
-                    if(target) { target.name = newName.trim(); saveFullLocalData(fullData); loadLocalData(); renderView(); }
-                }
+                window.app.openModal('edit-cycle');
             },
 
             deleteManagingCycle: () => {
@@ -1667,13 +1601,7 @@
                 if(!cycle) return;
                 const week = cycle.weeks.find(w => w.id === state.managingWeekId);
                 if(!week) return;
-                const newName = prompt("Editar nombre/fecha de la semana:", week.range);
-                if(newName && newName.trim() !== '' && newName.trim() !== week.range) {
-                    const fullData = getFullLocalData();
-                    const targetCycle = fullData.cycles.find(c => c.id === state.managingCycleId);
-                    const target = targetCycle.weeks.find(w => w.id === state.managingWeekId);
-                    if(target) { target.range = newName.trim(); saveFullLocalData(fullData); loadLocalData(); renderView(); }
-                }
+                window.app.openModal('edit-week');
             },
             
             deleteManagingWeek: () => {
@@ -1692,19 +1620,7 @@
             },
 
             createNewWeek: () => {
-                const range = prompt("Ingresa la fecha de la nueva semana (ej. del 13 al 17 de julio):");
-                if (range === null || range.trim() === '') return;
-                const fullData = getFullLocalData();
-                const targetCycle = fullData.cycles.find(c => c.id === state.managingCycleId);
-                if (!targetCycle) return;
-                
-                const newWeek = { id: 'week_' + Date.now(), range: range.trim(), menu: MENU_POR_DEFECTO, orders: [], inactiveDays: [], status: 'planned' };
-                targetCycle.weeks.push(newWeek); 
-                saveFullLocalData(fullData); loadLocalData();
-                state.managingWeekId = newWeek.id; 
-                state.draftMenu = JSON.parse(JSON.stringify(newWeek.menu));
-                state.draftInactiveDays = [];
-                alert(`¡Semana "${newWeek.range}" creada exitosamente!`); renderView();
+                window.app.openModal('create-week');
             },
 
             makeWeekActive: (weekId) => {
@@ -2447,6 +2363,11 @@
                 state.adminData.passwords = { admin: document.getElementById('pwd-admin').value.trim(), cocina: document.getElementById('pwd-cocina').value.trim(), escuela: document.getElementById('pwd-escuela').value.trim() };
                 const fullData = getFullLocalData(); fullData.adminData = state.adminData; saveFullLocalData(fullData);
                 alert("¡Contraseñas actualizadas correctamente!");
+            },
+
+            resetFirebaseData: async () => {
+                await initializeEmptyDB();
+                alert("¡Datos reiniciados correctamente!");
             }
         };
 
