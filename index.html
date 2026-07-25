@@ -19,6 +19,16 @@
             from { opacity: 0; transform: translateY(10px); }
             to { opacity: 1; transform: translateY(0); }
         }
+        .toast { animation: slideIn 0.3s ease-out; }
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateY(-20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .toast.out { animation: slideOut 0.3s ease-out forwards; }
+        @keyframes slideOut {
+            from { opacity: 1; transform: translateY(0); }
+            to { opacity: 0; transform: translateY(-20px); }
+        }
     </style>
 </head>
 <body class="bg-slate-50 text-slate-800 font-sans selection:bg-blue-100 min-h-screen">
@@ -54,6 +64,9 @@
         
         <!-- Modal Container -->
         <div id="modal-container"></div>
+        
+        <!-- Toast Notifications Container -->
+        <div id="toast-container" class="fixed top-4 right-4 z-40 space-y-2 max-w-sm"></div>
     </div>
 
     <!-- Logic Script (Type Module for Firebase) -->
@@ -85,6 +98,7 @@
         const DIAS_SEMANA = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes'];
         const GRADOS = ['1A', '1B', '2A', '2B', '3A', '3B', '4A', '5A', '6A'];
         
+const DEFAULT_ORDER_PRICE = 35;
         const MENU_POR_DEFECTO = {
             Lunes: [],
             Martes: [],
@@ -115,8 +129,14 @@
             adminData: {
                 grades: [], students: {}, alimentos: [], bebidas: [],   
                 passwords: {}, contactInfo: { name: '', phone: '' },
-                settings: { homeOrderSchedule: { mode: 'always', days: [1,2,3,4,5], start: '07:00', end: '16:00' } }
+                settings: { homeOrderSchedule: { mode: 'always', days: [1,2,3,4,5], start: '07:00', end: '16:00' } },
+                menuTemplates: [],
+                pricing: { defaultOrder: DEFAULT_ORDER_PRICE }
             },
+            menuConfigSearch: '',
+            reportPeriod: 'semanal',
+            reportDay: 'Lunes',
+            
             adminSelectedGrade: '',
             adminStudentAddMode: 'masivo', 
             editingStudent: null, 
@@ -128,13 +148,17 @@
             adminSelectedAlimentos: [],
             adminSelectedBebidas: [],
             adminStudentSearch: '',
+            adminStudentSuggestionOpen: false,
             adminAlimentoSearch: '',
             adminBebidaSearch: '',
+            
+            schoolOrderSearch: '', // Búsqueda en pedidos de escuela
             
             adminOrderDay: 'Lunes',
             adminOrderGrade: 'Todos',
             
             adminTab: 'config', // Nueva propiedad para controlar tabs del admin
+            menuConfigTab: 'alimentos', // Tab para Alimentos/Bebidas en Config. Menú
             
             activeModal: null,
             modalData: {},
@@ -179,6 +203,8 @@
             if (!state.adminData.passwords) state.adminData.passwords = { admin: 'admin', cocina: '', escuela: '' };
             if (!state.adminData.contactInfo) state.adminData.contactInfo = { name: '', phone: '' };
             if (!state.adminData.settings) state.adminData.settings = { homeOrderSchedule: { mode: 'always', days: [1,2,3,4,5], start: '07:00', end: '16:00' } };
+            if (!state.adminData.menuTemplates) state.adminData.menuTemplates = [];
+            if (!state.adminData.pricing) state.adminData.pricing = { defaultOrder: DEFAULT_ORDER_PRICE };
 
             if (!state.activeCycleId || !state.cycles.find(c => c.id === state.activeCycleId)) {
                 state.activeCycleId = state.cycles.length > 0 ? state.cycles[0].id : null;
@@ -215,6 +241,97 @@
             renderView();
         }
 
+        function loadLocalData() {
+            if (cloudData) {
+                hydrateState(cloudData);
+            }
+        }
+
+        function formatCurrency(amount) {
+            return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 }).format(amount);
+        }
+
+        function getReportOrders(cycle, week, period, day) {
+            if (!cycle) return [];
+            if (period === 'mensual') {
+                return cycle.weeks.flatMap(w => w.orders || []);
+            }
+            if (period === 'semanal') {
+                return week ? (week.orders || []) : [];
+            }
+            if (period === 'diario') {
+                return week ? (week.orders || []).filter(o => o.dayFor === day) : [];
+            }
+            return [];
+        }
+
+        function computeFoodStats(orders) {
+            return orders.reduce((acc, o) => {
+                const items = o.breakfastType.split(' + ').map(i => i.trim()).filter(Boolean);
+                items.forEach(item => { acc[item] = (acc[item] || 0) + 1; });
+                return acc;
+            }, {});
+        }
+
+        function exportReportCsv(reportData) {
+            const rows = [];
+            rows.push(['Alumno', 'Grado', 'Día', 'Pedido', 'Estatus', 'Pago', 'Fecha']);
+            reportData.forEach(o => {
+                rows.push([o.studentName, o.grade, o.dayFor, o.breakfastType, o.status, o.paymentStatus, new Date(o.createdAt).toLocaleDateString()]);
+            });
+            const csvContent = rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = 'reporte_lonchapp.csv';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+        }
+
+        function exportReportPdf(reportData) {
+            const win = window.open('', '_blank');
+            if (!win) return;
+            const html = `
+                <html>
+                <head>
+                    <title>Reporte LonchApp</title>
+                    <style>
+                        body { font-family: sans-serif; padding: 24px; color: #0f172a; }
+                        h1 { font-size: 24px; margin-bottom: 12px; }
+                        table { width: 100%; border-collapse: collapse; margin-top: 16px; }
+                        th, td { padding: 10px; border: 1px solid #cbd5e1; text-align: left; }
+                        th { background: #f8fafc; }
+                    </style>
+                </head>
+                <body>
+                    <h1>Reporte LonchApp</h1>
+                    <table>
+                        <thead><tr><th>Alumno</th><th>Grado</th><th>Día</th><th>Pedido</th><th>Estatus</th><th>Pago</th><th>Fecha</th></tr></thead>
+                        <tbody>
+                        ${reportData.map(o => `
+                            <tr>
+                                <td>${o.studentName}</td>
+                                <td>${o.grade}</td>
+                                <td>${o.dayFor}</td>
+                                <td>${o.breakfastType}</td>
+                                <td>${o.status}</td>
+                                <td>${o.paymentStatus}</td>
+                                <td>${new Date(o.createdAt).toLocaleDateString()}</td>
+                            </tr>
+                        `).join('')}
+                        </tbody>
+                    </table>
+                </body>
+                </html>
+            `;
+            win.document.write(html);
+            win.document.close();
+            win.focus();
+        }
+
         async function initializeEmptyDB() {
             const newWeek = { id: 'week_' + Date.now(), range: 'Primera Semana', menu: MENU_POR_DEFECTO, orders: [], inactiveDays: [], status: 'active' };
             const newCycle = { id: 'cycle_' + Date.now(), name: 'Ciclo 2025-2026', weeks: [newWeek], activeWeekId: newWeek.id };
@@ -229,7 +346,9 @@
                     bebidas: [],
                     passwords: { admin: 'admin', cocina: '', escuela: '' },
                     contactInfo: { name: '', phone: '' },
-                    settings: { homeOrderSchedule: { mode: 'always', days: [1,2,3,4,5], start: '07:00', end: '16:00' } }
+                    settings: { homeOrderSchedule: { mode: 'always', days: [1,2,3,4,5], start: '07:00', end: '16:00' } },
+                    menuTemplates: [],
+                    pricing: { defaultOrder: DEFAULT_ORDER_PRICE }
                 }
             };
             
@@ -335,6 +454,71 @@
             if(window.lucide) lucide.createIcons();
         }
 
+        function updateAdminStudentSearchUI() {
+            const students = state.adminData.students[state.adminSelectedGrade] || [];
+            const searchQuery = (state.adminStudentSearch || '').trim().toLowerCase();
+            const filteredStudents = students.filter(s => {
+                return !searchQuery || s.name.toLowerCase().includes(searchQuery) || (s.curp && s.curp.toLowerCase().includes(searchQuery));
+            });
+            const suggestionStudents = students.filter(s => {
+                const haystack = `${s.name} ${s.curp || ''}`.toLowerCase();
+                return !!searchQuery && haystack.includes(searchQuery);
+            }).slice(0, 8);
+
+            const suggestionsContainer = document.getElementById('admin-student-suggestions');
+            if (suggestionsContainer) {
+                if (state.adminStudentSuggestionOpen && searchQuery && suggestionStudents.length > 0) {
+                    suggestionsContainer.classList.remove('hidden');
+                    suggestionsContainer.innerHTML = suggestionStudents.map(student => `
+                        <button type="button" onclick="window.app.selectStudentSuggestion('${student.id}');" class="w-full px-3 py-2.5 text-left text-sm text-slate-700 hover:bg-slate-50 flex items-center justify-between gap-2 border-b border-slate-100 last:border-b-0">
+                            <span>${student.name}</span>
+                            <span class="text-xs text-slate-400 whitespace-nowrap">${student.curp || 'Sin CURP'}</span>
+                        </button>
+                    `).join('');
+                } else {
+                    suggestionsContainer.classList.add('hidden');
+                    suggestionsContainer.innerHTML = '';
+                }
+            }
+
+            const studentListContainer = document.getElementById('admin-student-list');
+            if (studentListContainer) {
+                if (filteredStudents.length > 0) {
+                    studentListContainer.innerHTML = filteredStudents.map(student => `
+                        <div class="rounded-3xl border border-slate-200 p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div class="space-y-2">
+                                <div class="flex items-center gap-2">
+                                    <input type="checkbox" onchange="window.app.toggleStudentSelect('${student.id}')" ${state.adminSelectedStudents.includes(student.id) ? 'checked' : ''} class="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500">
+                                    <div>
+                                        <p class="font-semibold text-slate-900">${student.name}</p>
+                                        <p class="text-xs text-slate-500">CURP: ${student.curp || 'No disponible'} • Contraseña: ${student.password || '—'}</p>
+                                    </div>
+                                </div>
+                                <div class="flex flex-wrap gap-2 text-sm">
+                                    <button type="button" onclick="window.app.openEditStudentModal('${student.id}')" class="px-3 py-2 rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200">Editar</button>
+                                    <button type="button" onclick="window.app.toggleStudentBlock('${student.id}')" class="px-3 py-2 rounded-xl ${student.isBlocked ? 'bg-amber-500 text-white hover:bg-amber-600' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}">${student.isBlocked ? 'Desbloquear' : 'Bloquear'}</button>
+                                </div>
+                            </div>
+                        </div>
+                    `).join('');
+                } else {
+                    studentListContainer.innerHTML = '<p class="text-slate-500 text-sm">No hay alumnos registrados en este grado.</p>';
+                }
+            }
+
+            const countsContainer = document.getElementById('admin-student-counts');
+            if (countsContainer) {
+                countsContainer.innerHTML = `<span>${filteredStudents.length} alumno(s) mostrados</span><span>${state.adminSelectedStudents.length} seleccionado(s)</span>`;
+            }
+
+            const deleteButton = document.getElementById('admin-student-delete-selected');
+            if (deleteButton) {
+                deleteButton.disabled = state.adminSelectedStudents.length === 0;
+                deleteButton.classList.toggle('opacity-50', state.adminSelectedStudents.length === 0);
+                deleteButton.classList.toggle('cursor-not-allowed', state.adminSelectedStudents.length === 0);
+            }
+        }
+
         // --- VISTAS ---
         function renderHomeView() {
             const activeWeek = getActiveWeek();
@@ -343,8 +527,8 @@
 
             // Estado de conexión discreto para Firebase
             const dbStatusHtml = state.dbConnected 
-                ? '<span class="text-emerald-500 flex justify-center items-center gap-1"><i data-lucide="cloud-check" class="w-3 h-3"></i> Conectado a Firebase</span>'
-                : '<span class="text-amber-500 flex justify-center items-center gap-1"><i data-lucide="cloud-off" class="w-3 h-3 animate-pulse"></i> Conectando...</span>';
+                ? '<span class="text-emerald-500 inline-flex flex-col items-center gap-0.5"><span class="inline-flex items-center gap-1"><i data-lucide="cloud-check" class="w-3 h-3"></i> Conectado a Firebase</span><span class="text-xs opacity-60">v5.2</span></span>'
+                : '<span class="text-amber-500 inline-flex items-center gap-1"><i data-lucide="cloud-off" class="w-3 h-3 animate-pulse"></i> Conectando...</span>';
 
             return `
                 <div class="max-w-3xl mx-auto fade-in">
@@ -758,10 +942,19 @@
                     </div>
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-6 mt-6">
                         <div>
-                            <label class="block text-sm font-semibold text-slate-700 mb-2">Nombre del Alumno</label>
-                            <select id="form-student" disabled class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all text-slate-700 disabled:opacity-50 appearance-none" required>
-                                <option value="">Primero elige un grado</option>
-                            </select>
+                            <label class="block text-sm font-semibold text-slate-700 mb-2 flex items-center gap-2"><i data-lucide="search" class="w-4 h-4 text-slate-400"></i> Nombre del Alumno</label>
+                            <div class="relative">
+                                <div class="relative">
+                                    <input type="text" id="form-student-search" placeholder="Buscar alumno..." class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all text-slate-700" oninput="window.app.filterStudents(this.value)">
+                                    <button type="button" onclick="window.app.toggleStudentDropdown()" class="absolute right-2 top-1/2 -translate-y-1/2 bg-white border border-slate-200 rounded-full w-8 h-8 flex items-center justify-center text-slate-500 hover:bg-slate-50">
+                                        <i data-lucide="chevrons-down" class="w-4 h-4"></i>
+                                    </button>
+                                </div>
+                                <select id="form-student" disabled class="hidden w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all text-slate-700 disabled:opacity-50 appearance-none" required>
+                                    <option value="">Primero elige un grado</option>
+                                </select>
+                                <div id="student-dropdown" class="hidden absolute top-12 left-0 right-0 z-10 bg-white border border-slate-200 rounded-xl shadow-lg max-h-48 overflow-y-auto custom-scrollbar"></div>
+                            </div>
                         </div>
                 `;
                 
@@ -865,10 +1058,52 @@
                         <i data-lucide="check-circle-2" class="w-6 h-6"></i> Confirmar Pedido
                     </button>
                 </form>
+                
+                ${source === 'Casa' && state.loggedStudent ? `
+                    <div class="mt-8 pt-8 border-t border-slate-200">
+                        <h3 class="font-bold text-lg text-slate-900 mb-4 flex items-center gap-2">
+                            <i data-lucide="history" class="w-5 h-5 text-slate-600"></i> Historial de Pedidos
+                        </h3>
+                        <div id="order-history" class="space-y-3">
+                            ${(() => {
+                                const fullData = getFullLocalData();
+                                const allOrders = [];
+                                fullData.cycles?.forEach(cycle => {
+                                    cycle.weeks?.forEach(week => {
+                                        week.orders?.forEach(order => {
+                                            if (order.studentName === state.loggedStudent.name) {
+                                                allOrders.push({...order, weekRange: week.range});
+                                            }
+                                        });
+                                    });
+                                });
+                                
+                                if (allOrders.length === 0) {
+                                    return '<p class="text-center py-6 text-slate-500 text-sm italic">No hay pedidos anteriores registrados</p>';
+                                }
+                                
+                                return allOrders.slice(-10).reverse().map(o => `
+                                    <div class="bg-slate-50 p-4 rounded-lg border border-slate-200 flex justify-between items-start">
+                                        <div>
+                                            <p class="font-semibold text-slate-900">${o.breakfastType}</p>
+                                            <p class="text-xs text-slate-500 mt-1">${o.dayFor} • ${o.weekRange}</p>
+                                            <p class="text-xs text-slate-600 mt-1">Estado: ${o.status === 'entregado' ? '✓ Entregado' : '⏳ Pendiente'}</p>
+                                        </div>
+                                        ${window.app.getPaymentBadge(o.paymentStatus)}
+                                    </div>
+                                `).join('');
+                            })()}
+                        </div>
+                    </div>
+                ` : ''}
             `;
         }
 
         function renderMenuConfigurator() {
+            const searchQuery = state.menuConfigSearch.toLowerCase().trim();
+            const filteredFoods = state.adminData.alimentos.filter(item => item.toLowerCase().includes(searchQuery));
+            const filteredBebidas = state.adminData.bebidas.filter(item => item.toLowerCase().includes(searchQuery));
+
             let daysHtml = '';
             DIAS_SEMANA.forEach(d => {
                 const isActive = d === state.menuConfigDay;
@@ -876,22 +1111,22 @@
                 const btnClass = isActive ? 'bg-slate-800 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50';
                 const badgeClass = isActive ? 'bg-slate-600 text-white' : 'bg-slate-200 text-slate-600';
                 const badgeHtml = count > 0 ? `<span class="ml-2 text-xs px-1.5 py-0.5 rounded-full ${badgeClass}">${count}</span>` : '';
-                
                 daysHtml += `<button onclick="window.app.setMenuDay('${d}')" class="px-5 py-2.5 rounded-lg text-sm font-bold border transition-colors ${btnClass}">${d}${badgeHtml}</button>`;
             });
 
             const currentSelection = state.draftMenu[state.menuConfigDay] || [];
             const isInactive = state.draftInactiveDays.includes(state.menuConfigDay);
-            
+
             const renderCategory = (items) => {
-                let html = '';
-                items.forEach(item => {
+                if (items.length === 0) {
+                    return `<div class="col-span-full bg-slate-50 text-slate-500 p-4 rounded-xl text-sm border border-slate-100">No hay resultados para la búsqueda.</div>`;
+                }
+                return items.map(item => {
                     const isSelected = currentSelection.includes(item);
                     const btnClass = isSelected ? 'border-emerald-500 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-white hover:border-slate-300 text-slate-600';
                     const circleClass = isSelected ? 'bg-emerald-500 text-white' : 'bg-slate-200';
                     const checkHtml = isSelected ? `<i data-lucide="check" class="w-3 h-3" stroke-width="4"></i>` : '';
-
-                    html += `
+                    return `
                         <button onclick="window.app.toggleFood('${item}')" class="flex items-center text-left w-full p-3 rounded-xl border transition-all text-sm ${btnClass}">
                             <div class="w-5 h-5 rounded-full mr-3 flex items-center justify-center flex-shrink-0 ${circleClass}">
                                 ${checkHtml}
@@ -899,14 +1134,28 @@
                             <span class="font-medium leading-tight">${item}</span>
                         </button>
                     `;
-                });
-                return html;
+                }).join('');
             };
+
+            const savedTemplatesHtml = state.adminData.menuTemplates.length > 0
+                ? state.adminData.menuTemplates.map(template => `
+                    <div class="bg-white border border-slate-200 rounded-2xl p-4 flex items-center justify-between gap-3 shadow-sm">
+                        <div>
+                            <p class="font-semibold text-slate-900">${template.name}</p>
+                            <p class="text-xs text-slate-500">${Object.values(template.menu).reduce((acc, items) => acc + items.length, 0)} opciones guardadas</p>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <button onclick="window.app.applyMenuTemplate('${template.id}')" class="px-3 py-2 rounded-xl bg-blue-600 text-white text-sm hover:bg-blue-700 transition-colors">Aplicar</button>
+                            <button onclick="window.app.deleteMenuTemplate('${template.id}')" class="px-3 py-2 rounded-xl bg-red-100 text-red-700 text-sm hover:bg-red-200 transition-colors">Eliminar</button>
+                        </div>
+                    </div>
+                `).join('')
+                : `<div class="bg-slate-50 border border-slate-200 rounded-2xl p-4 text-slate-500 text-sm">No hay plantillas guardadas aún.</div>`;
 
             let configBodyHtml = '';
             if (isInactive) {
                 configBodyHtml = `
-                    <div class="py-10 text-center flex flex-col items-center justify-center bg-white rounded-xl border border-red-100 shadow-sm">
+                    <div class="py-10 text-center flex flex-col items-center justify-center bg-white rounded-xl border border-red-100 shadow-sm mb-4">
                         <div class="bg-red-50 p-4 rounded-full mb-3"><i data-lucide="calendar-off" class="w-8 h-8 text-red-500"></i></div>
                         <h4 class="font-bold text-slate-800 text-lg">Día Inhábil Activado</h4>
                         <p class="text-slate-500 text-sm mt-1 max-w-sm">Has marcado este día como inhábil. No se mostrará menú ni se aceptarán pedidos.</p>
@@ -918,16 +1167,33 @@
                         <span class="font-semibold text-slate-700">Opciones para el ${state.menuConfigDay}</span>
                         <span class="text-sm font-normal text-slate-500 bg-white px-2 py-1 rounded-md border">${currentSelection.length} seleccionados</span>
                     </div>
-                    
-                    <h5 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Alimentos</h5>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 mb-6">
-                        ${renderCategory(state.adminData.alimentos)}
+                    <div class="grid gap-4 mb-6 lg:grid-cols-[1fr_320px]">
+                        <div class="flex items-center gap-2">
+                            <input type="text" placeholder="Buscar alimento o bebida..." value="${state.menuConfigSearch}" oninput="window.app.setMenuConfigSearch(this.value)" class="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm text-slate-700 outline-none focus:border-slate-900 focus:ring-2 focus:ring-slate-200" />
+                            <button onclick="window.app.saveCurrentMenuTemplate()" type="button" class="bg-emerald-600 hover:bg-emerald-700 text-white px-5 py-3 rounded-xl text-sm font-semibold transition-colors">Guardar Plantilla</button>
+                        </div>
+                        <div class="space-y-3">
+                            <div class="text-slate-500 text-sm">Plantillas guardadas</div>
+                            ${savedTemplatesHtml}
+                        </div>
                     </div>
-                    
-                    <h5 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Bebidas</h5>
-                    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                        ${renderCategory(state.adminData.bebidas)}
+                    <div class="flex gap-2 mb-6 border-b border-slate-200">
+                        <button onclick="window.app.setMenuConfigTab('alimentos')" class="px-4 py-3 font-semibold text-sm transition-all border-b-2 ${state.menuConfigTab === 'alimentos' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-700'}">🍽️ Alimentos</button>
+                        <button onclick="window.app.setMenuConfigTab('bebidas')" class="px-4 py-3 font-semibold text-sm transition-all border-b-2 ${state.menuConfigTab === 'bebidas' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-700'}">🥤 Bebidas</button>
                     </div>
+                    ${state.menuConfigTab === 'alimentos' ? `
+                        <div class="animate-in fade-in duration-200">
+                            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                                ${renderCategory(filteredFoods)}
+                            </div>
+                        </div>
+                    ` : `
+                        <div class="animate-in fade-in duration-200">
+                            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                                ${renderCategory(filteredBebidas)}
+                            </div>
+                        </div>
+                    `}
                 `;
             }
 
@@ -936,11 +1202,9 @@
                     <div>
                         <h3 class="font-bold text-lg text-slate-900 mb-2">Diseño del Menú</h3>
                         <p class="text-slate-500 text-sm mb-6">Configurando opciones para la semana: <strong>${getManagingWeek().range}</strong>.</p>
-                        
                         <div class="flex flex-wrap gap-2 mb-6">
                             ${daysHtml}
                         </div>
-
                         <div class="bg-slate-50 p-6 rounded-2xl border border-slate-100">
                             <div class="mb-6 bg-white p-4 rounded-xl border ${isInactive ? 'border-red-300 bg-red-50/50' : 'border-slate-200'} flex items-center justify-between shadow-sm transition-colors">
                                 <div>
@@ -955,7 +1219,6 @@
                                     <div class="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-500"></div>
                                 </label>
                             </div>
-
                             ${configBodyHtml}
                         </div>
                     </div>
@@ -1006,7 +1269,7 @@
                         <h3 class="font-bold text-2xl text-slate-900 flex items-center gap-2">
                             <i data-lucide="database" class="w-6 h-6 text-slate-600"></i> Administración del Sistema
                         </h3>
-                        <p class="text-slate-500 text-sm mt-1">Gestiona ciclos, catálogos, reportes y accesos. <span class="text-slate-300 text-xs">v4.5</span></p>
+                        <p class="text-slate-500 text-sm mt-1">Gestiona ciclos, catálogos, reportes y accesos. <span class="text-slate-300 text-xs">v5.2</span></p>
                     </div>
 
                     ${tabButtons}
@@ -1027,6 +1290,8 @@
             if (state.activeModal === 'edit-cycle') return renderEditCycleModal();
             if (state.activeModal === 'create-week') return renderCreateWeekModal();
             if (state.activeModal === 'edit-week') return renderEditWeekModal();
+            if (state.activeModal === 'add-students-bulk') return renderAddStudentsModal();
+            if (state.activeModal === 'add-student-single') return renderAddSingleStudentModal();
             
             return '';
         }
@@ -1242,22 +1507,104 @@
                 gradesOptionsHtml += `<option value="${g}" ${state.adminSelectedGrade === g ? 'selected' : ''}>${g}</option>`;
             });
 
+            const students = state.adminSelectedGrade ? (state.adminData.students[state.adminSelectedGrade] || []) : [];
+            const searchQuery = (state.adminStudentSearch || '').trim().toLowerCase();
+            const filteredStudents = students.filter(s => {
+                return !searchQuery || s.name.toLowerCase().includes(searchQuery) || (s.curp && s.curp.toLowerCase().includes(searchQuery));
+            });
+            const suggestionStudents = students.filter(s => {
+                const haystack = `${s.name} ${s.curp || ''}`.toLowerCase();
+                return !searchQuery || haystack.includes(searchQuery);
+            }).slice(0, 8);
+            const selectedCount = state.adminSelectedStudents.length;
+            const allSelected = filteredStudents.length > 0 && filteredStudents.every(s => state.adminSelectedStudents.includes(s.id));
+
             return `
                 <div class="space-y-6">
-                    <div class="bg-blue-50 p-5 rounded-2xl border border-blue-100">
-                        <h4 class="font-bold text-blue-900 mb-4">Gestión de Alumnos</h4>
-                        <p class="text-sm text-blue-700 mb-4">Selecciona un grado para ver, agregar o editar alumnos.</p>
-                        <select onchange="window.app.adminSelectGrade(this.value)" class="w-full md:w-1/2 bg-white border border-blue-300 rounded-lg px-4 py-3 text-sm font-semibold outline-none focus:ring-2 focus:ring-blue-200">
-                            ${gradesOptionsHtml}
-                        </select>
+                    <div class="grid gap-6 lg:grid-cols-2">
+                        <div class="bg-blue-50 p-5 rounded-2xl border border-blue-100 h-fit">
+                            <h4 class="font-bold text-blue-900 mb-4">Gestión de Alumnos</h4>
+                            <p class="text-sm text-blue-700 mb-4">Selecciona un grado para ver, agregar o editar alumnos.</p>
+                            <select onchange="window.app.adminSelectGrade(this.value)" class="w-full bg-white border border-blue-300 rounded-lg px-4 py-3 text-sm font-semibold outline-none focus:ring-2 focus:ring-blue-200">
+                                ${gradesOptionsHtml}
+                            </select>
+                        </div>
+
+                        ${state.adminSelectedGrade ? `
+                            <div class="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm h-fit">
+                                <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                                    <div>
+                                        <h5 class="font-bold text-slate-900 mb-2">Alumnos del grado ${state.adminSelectedGrade}</h5>
+                                        <p class="text-slate-500 text-sm">Busca, agrega y administra alumnos por grado.</p>
+                                    </div>
+                                    <div class="flex flex-wrap gap-2">
+                                        <button type="button" onclick="window.app.openModal('add-students-bulk')" class="px-4 py-2 rounded-xl text-sm font-semibold transition bg-slate-100 text-slate-700 hover:bg-slate-200">Carga masiva</button>
+                                        <button type="button" onclick="window.app.openModal('add-student-single')" class="px-4 py-2 rounded-xl text-sm font-semibold transition bg-slate-100 text-slate-700 hover:bg-slate-200">Individual</button>
+                                    </div>
+                                </div>
+
+                                <div class="grid gap-4 mt-4">
+                                    <div>
+                                        <label class="block text-sm font-semibold text-slate-600 mb-2">Buscar alumno</label>
+                                        <div id="admin-student-search-box" class="relative">
+                                            <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                                <i data-lucide="search" class="w-4 h-4 text-slate-400"></i>
+                                            </div>
+                                            <input id="admin-student-search" type="text" value="${state.adminStudentSearch || ''}" oninput="window.app.setSearch('student', this.value)" placeholder="Buscar alumno por nombre o CURP..." class="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-4 py-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" autocomplete="off" spellcheck="false">
+                                            <div id="admin-student-suggestions" class="absolute z-20 left-0 right-0 top-full mt-1 rounded-xl border border-slate-200 bg-white shadow-xl overflow-hidden ${state.adminStudentSuggestionOpen && searchQuery && suggestionStudents.length > 0 ? '' : 'hidden'}">
+                                                ${state.adminStudentSuggestionOpen && searchQuery && suggestionStudents.length > 0 ? suggestionStudents.map(student => `
+                                                    <button type="button" onclick="window.app.selectStudentSuggestion('${student.id}');" class="w-full px-3 py-2.5 text-left text-sm text-slate-700 hover:bg-slate-50 flex items-center justify-between gap-2 border-b border-slate-100 last:border-b-0">
+                                                        <span>${student.name}</span>
+                                                        <span class="text-xs text-slate-400 whitespace-nowrap">${student.curp || 'Sin CURP'}</span>
+                                                    </button>
+                                                `).join('') : ''}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="space-y-3">
+                                        <div class="flex flex-wrap gap-2">
+                                            <button type="button" onclick="window.app.toggleAllStudents(true)" class="px-4 py-2 rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 text-sm font-semibold">Seleccionar todos</button>
+                                            <button type="button" onclick="window.app.toggleAllStudents(false)" class="px-4 py-2 rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200 text-sm font-semibold">Deseleccionar</button>
+                                        </div>
+                                        <div id="admin-student-counts" class="flex flex-wrap items-center gap-3 text-sm text-slate-500">
+                                            <span>${filteredStudents.length} alumno(s) mostrados</span>
+                                            <span>${selectedCount} seleccionado(s)</span>
+                                        </div>
+                                        <button id="admin-student-delete-selected" type="button" onclick="window.app.deleteSelectedStudents()" class="w-full px-4 py-3 rounded-xl text-sm font-semibold text-white bg-red-600 hover:bg-red-700 transition ${selectedCount === 0 ? 'opacity-50 cursor-not-allowed' : ''}" ${selectedCount === 0 ? 'disabled' : ''}>Eliminar seleccionados</button>
+                                    </div>
+                                </div>
+                            </div>
+                        ` : '<div class="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm text-center py-12 text-slate-500">Selecciona un grado para comenzar</div>'}
                     </div>
 
                     ${state.adminSelectedGrade ? `
                         <div class="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
-                            <h5 class="font-bold text-slate-900 mb-4">Alumnos del grado ${state.adminSelectedGrade}</h5>
-                            <p class="text-slate-500 text-sm">La gestión de alumnos está disponible. Usa los botones para editar o eliminar.</p>
+                            <h6 class="font-semibold text-slate-900 mb-4">Lista de alumnos</h6>
+                            <div id="admin-student-list">
+                                ${filteredStudents.length > 0 ? `
+                                    <div class="space-y-3">
+                                        ${filteredStudents.map(student => `
+                                            <div class="rounded-3xl border border-slate-200 p-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                                <div class="space-y-2">
+                                                    <div class="flex items-center gap-2">
+                                                        <input type="checkbox" onchange="window.app.toggleStudentSelect('${student.id}')" ${state.adminSelectedStudents.includes(student.id) ? 'checked' : ''} class="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500">
+                                                        <div>
+                                                            <p class="font-semibold text-slate-900">${student.name}</p>
+                                                            <p class="text-xs text-slate-500">CURP: ${student.curp || 'No disponible'} • Contraseña: ${student.password || '—'}</p>
+                                                        </div>
+                                                    </div>
+                                                    <div class="flex flex-wrap gap-2 text-sm">
+                                                        <button type="button" onclick="window.app.openEditStudentModal('${student.id}')" class="px-3 py-2 rounded-xl bg-slate-100 text-slate-700 hover:bg-slate-200">Editar</button>
+                                                        <button type="button" onclick="window.app.toggleStudentBlock('${student.id}')" class="px-3 py-2 rounded-xl ${student.isBlocked ? 'bg-amber-500 text-white hover:bg-amber-600' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}">${student.isBlocked ? 'Desbloquear' : 'Bloquear'}</button>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        `).join('')}
+                                    </div>
+                                ` : '<p class="text-slate-500 text-sm">No hay alumnos registrados en este grado.</p>'}
+                            </div>
                         </div>
-                    ` : '<div class="text-center py-12 text-slate-500">Selecciona un grado para comenzar</div>'}
+                    ` : ''}
                 </div>
             `;
         }
@@ -1289,13 +1636,132 @@
         }
 
         function renderAdminTabReporte() {
+            const reportCycle = state.cycles.find(c => c.id === state.reportCycleId) || getActiveCycle();
+            const reportWeek = reportCycle ? reportCycle.weeks.find(w => w.id === state.reportWeekId) : null;
+            const reportOrders = getReportOrders(reportCycle, reportWeek, state.reportPeriod, state.reportDay);
+            const totalOrders = reportOrders.length;
+            const totalRevenue = totalOrders * (state.adminData.pricing?.defaultOrder || DEFAULT_ORDER_PRICE);
+            const debtOrders = reportOrders.filter(o => o.paymentStatus === 'Fiado');
+            const debtAmount = debtOrders.length * (state.adminData.pricing?.defaultOrder || DEFAULT_ORDER_PRICE);
+            const uniqueStudents = new Set(reportOrders.map(o => o.studentName)).size;
+            const paymentsCount = reportOrders.reduce((acc, o) => {
+                acc[o.paymentStatus] = (acc[o.paymentStatus] || 0) + 1;
+                return acc;
+            }, {});
+            const foodStats = computeFoodStats(reportOrders);
+            const orderedFoods = Object.entries(foodStats).sort((a, b) => b[1] - a[1]);
+            const mostPopular = orderedFoods.slice(0, 3);
+            const leastPopular = orderedFoods.slice(-3).reverse();
+            const debtSummary = Object.values(debtOrders.reduce((acc, o) => {
+                if (!acc[o.studentName]) acc[o.studentName] = { studentName: o.studentName, amount: 0, firstDate: o.createdAt };
+                acc[o.studentName].amount += (state.adminData.pricing?.defaultOrder || DEFAULT_ORDER_PRICE);
+                if (o.createdAt < acc[o.studentName].firstDate) acc[o.studentName].firstDate = o.createdAt;
+                return acc;
+            }, {}));
+
+            const cycleOptionsHtml = state.cycles.map(c => `<option value="${c.id}" ${c.id === state.reportCycleId ? 'selected' : ''}>${c.name}</option>`).join('');
+            const weekOptionsHtml = reportCycle && reportCycle.weeks.length > 0
+                ? reportCycle.weeks.map(w => `<option value="${w.id}" ${w.id === state.reportWeekId ? 'selected' : ''}>${w.range}</option>`).join('')
+                : '<option value="">Sin semanas</option>';
+
+            const dayButtonsHtml = DIAS_SEMANA.map(day => {
+                const active = day === state.reportDay;
+                return `<button type="button" onclick="window.app.setReportDay('${day}')" class="px-3 py-2 rounded-lg text-sm font-semibold ${active ? 'bg-slate-900 text-white' : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'}">${day}</button>`;
+            }).join('');
+
             return `
-                <div class="bg-white p-6 rounded-2xl border border-slate-100 shadow-sm">
-                    <h4 class="font-bold text-slate-900 mb-4">Reporte de Ventas</h4>
-                    <p class="text-slate-600 mb-4">Aquí se mostrará el reporte detallado de ventas por día, grado, fuente y estatus de pago.</p>
-                    <div class="bg-slate-50 p-8 rounded-lg text-center text-slate-500">
-                        <i data-lucide="chart-bar" class="w-12 h-12 mx-auto mb-2 text-slate-300"></i>
-                        Reporte de ventas
+                <div class="space-y-6">
+                    <div class="grid gap-4 lg:grid-cols-[1fr_280px]">
+                        <div class="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+                            <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-6">
+                                <div>
+                                    <h4 class="font-bold text-slate-900">Reporte de Ventas</h4>
+                                    <p class="text-slate-500 text-sm">Ventas, deudas y popularidad por período.</p>
+                                </div>
+                                <div class="flex flex-wrap gap-2">
+                                    <button onclick="window.app.setReportPeriod('diario')" type="button" class="px-3 py-2 rounded-lg text-sm font-semibold ${state.reportPeriod === 'diario' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}">Diario</button>
+                                    <button onclick="window.app.setReportPeriod('semanal')" type="button" class="px-3 py-2 rounded-lg text-sm font-semibold ${state.reportPeriod === 'semanal' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}">Semanal</button>
+                                    <button onclick="window.app.setReportPeriod('mensual')" type="button" class="px-3 py-2 rounded-lg text-sm font-semibold ${state.reportPeriod === 'mensual' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}">Mensual</button>
+                                </div>
+                            </div>
+
+                            <div class="grid grid-cols-1 gap-4 md:grid-cols-2 mb-4">
+                                <div class="space-y-3">
+                                    <label class="text-xs font-semibold uppercase tracking-wide text-slate-400">Ciclo</label>
+                                    <select onchange="window.app.setReportCycle(this.value)" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-slate-900 focus:ring-2 focus:ring-slate-200">
+                                        ${cycleOptionsHtml}
+                                    </select>
+                                </div>
+                                <div class="space-y-3">
+                                    <label class="text-xs font-semibold uppercase tracking-wide text-slate-400">Semana</label>
+                                    <select onchange="window.app.setReportWeek(this.value)" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-slate-900 focus:ring-2 focus:ring-slate-200">
+                                        ${weekOptionsHtml}
+                                    </select>
+                                </div>
+                            </div>
+
+                            ${state.reportPeriod === 'diario' ? `
+                                <div class="mb-4">
+                                    <label class="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-2 block">Día</label>
+                                    <div class="flex flex-wrap gap-2">${dayButtonsHtml}</div>
+                                </div>
+                            ` : ''}
+
+                            <div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-4">
+                                <div class="bg-slate-50 p-4 rounded-3xl border border-slate-200">
+                                    <p class="text-xs uppercase tracking-wide text-slate-400 mb-2">Pedidos</p>
+                                    <p class="text-3xl font-bold text-slate-900">${totalOrders}</p>
+                                </div>
+                                <div class="bg-slate-50 p-4 rounded-3xl border border-slate-200">
+                                    <p class="text-xs uppercase tracking-wide text-slate-400 mb-2">Ingresos</p>
+                                    <p class="text-3xl font-bold text-slate-900">${formatCurrency(totalRevenue)}</p>
+                                </div>
+                                <div class="bg-slate-50 p-4 rounded-3xl border border-slate-200">
+                                    <p class="text-xs uppercase tracking-wide text-slate-400 mb-2">Deudas</p>
+                                    <p class="text-3xl font-bold text-slate-900">${formatCurrency(debtAmount)}</p>
+                                </div>
+                                <div class="bg-slate-50 p-4 rounded-3xl border border-slate-200">
+                                    <p class="text-xs uppercase tracking-wide text-slate-400 mb-2">Alumnos</p>
+                                    <p class="text-3xl font-bold text-slate-900">${uniqueStudents}</p>
+                                </div>
+                            </div>
+
+                            <div class="grid gap-4 xl:grid-cols-2">
+                                <div class="bg-white p-4 rounded-3xl border border-slate-100 shadow-sm">
+                                    <p class="text-sm font-semibold text-slate-700 mb-3">Alimentos más populares</p>
+                                    ${mostPopular.length ? mostPopular.map(([item, count]) => `
+                                        <div class="flex items-center justify-between py-3 border-t border-slate-100 ${item === mostPopular[0][0] ? 'pt-0' : ''}">
+                                            <span class="text-slate-700">${item}</span>
+                                            <span class="font-semibold text-slate-900">${count}</span>
+                                        </div>
+                                    `).join('') : '<p class="text-slate-500 text-sm">No hay datos de consumo aún.</p>'}
+                                </div>
+                                <div class="bg-white p-4 rounded-3xl border border-slate-100 shadow-sm">
+                                    <p class="text-sm font-semibold text-slate-700 mb-3">Alimentos menos populares</p>
+                                    ${leastPopular.length ? leastPopular.map(([item, count]) => `
+                                        <div class="flex items-center justify-between py-3 border-t border-slate-100 ${item === leastPopular[0][0] ? 'pt-0' : ''}">
+                                            <span class="text-slate-700">${item}</span>
+                                            <span class="font-semibold text-slate-900">${count}</span>
+                                        </div>
+                                    `).join('') : '<p class="text-slate-500 text-sm">No hay datos de consumo aún.</p>'}
+                                </div>
+                            </div>
+                        </div>
+                        <div class="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm">
+                            <div class="flex flex-col gap-3 mb-4">
+                                <button onclick="window.app.exportReport('pdf')" type="button" class="w-full bg-slate-900 hover:bg-slate-800 text-white px-4 py-3 rounded-xl font-semibold">Exportar PDF</button>
+                                <button onclick="window.app.exportReport('csv')" type="button" class="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-3 rounded-xl font-semibold">Exportar Excel</button>
+                            </div>
+                            <div class="bg-slate-50 p-4 rounded-3xl border border-slate-200">
+                                <p class="text-sm font-semibold text-slate-700 mb-3">Deudores</p>
+                                ${debtSummary.length ? debtSummary.map(d => `
+                                    <div class="py-3 border-t border-slate-100 ${d === debtSummary[0] ? 'border-t-0 pt-0' : ''}">
+                                        <p class="font-semibold text-slate-900">${d.studentName}</p>
+                                        <p class="text-sm text-slate-500">${formatCurrency(d.amount)} • Desde ${new Date(d.firstDate).toLocaleDateString()}</p>
+                                    </div>
+                                `).join('') : '<p class="text-slate-500 text-sm">No hay deudas registradas en este periodo.</p>'}
+                            </div>
+                        </div>
                     </div>
                 </div>
             `;
@@ -1340,6 +1806,63 @@
                             <div class="pt-4 border-t border-slate-100 flex gap-3">
                                 <button type="button" onclick="window.app.closeEditStudentModal()" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 py-2.5 rounded-xl font-semibold transition-colors">Cancelar</button>
                                 <button type="submit" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-xl font-semibold transition-colors">Guardar Cambios</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Modal para carga masiva de alumnos
+        function renderAddStudentsModal() {
+            return `
+                <div class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 fade-in">
+                    <div class="bg-white rounded-2xl p-6 w-full max-w-2xl shadow-2xl">
+                        <div class="flex justify-between items-center mb-4">
+                            <h3 class="text-lg font-bold">Carga masiva de alumnos</h3>
+                            <button onclick="window.app.closeModal()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x" class="w-5 h-5"></i></button>
+                        </div>
+                        <form onsubmit="window.app.addAdminItem(event, 'student')" class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-semibold text-slate-700 mb-2">Pega aquí las líneas (CURP APELLIDO/MATERNO*NOMBRE)</label>
+                                <textarea id="new-student-input" rows="10" placeholder="Una línea por alumno" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 resize-none" required></textarea>
+                                <p class="text-xs text-slate-500 mt-2">Ejemplo: <span class="font-mono">AAMJ171003MNTLDZA7 ALVAREZ/MEDINA*JAZLYN CELESTE</span></p>
+                            </div>
+                            <div class="flex justify-end gap-3 pt-4 border-t border-slate-100">
+                                <button type="button" onclick="window.app.closeModal()" class="bg-slate-100 hover:bg-slate-200 px-4 py-2 rounded-xl">Cancelar</button>
+                                <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl">Agregar alumnos</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Modal para agregar un alumno individual
+        function renderAddSingleStudentModal() {
+            return `
+                <div class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 fade-in">
+                    <div class="bg-white rounded-2xl p-6 w-full max-w-md shadow-2xl">
+                        <div class="flex justify-between items-center mb-4">
+                            <h3 class="text-lg font-bold">Agregar alumno individual</h3>
+                            <button onclick="window.app.closeModal()" class="text-slate-400 hover:text-slate-600"><i data-lucide="x" class="w-5 h-5"></i></button>
+                        </div>
+                        <form onsubmit="window.app.addSingleStudent(event)" class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-semibold text-slate-700 mb-2">Nombre (o APELLIDO/APE*MOMBRE)</label>
+                                <input id="ind-nombre" type="text" placeholder="Apellido/Apellido*Nombre o Nombre completo" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" required>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-semibold text-slate-700 mb-2">CURP (opcional)</label>
+                                <input id="ind-curp" type="text" placeholder="CURP (opcional)" oninput="window.app.prefillStudentPwd(this.value)" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 uppercase">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-semibold text-slate-700 mb-2">Contraseña</label>
+                                <input id="ind-pwd" type="text" placeholder="Contraseña para casa" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" required>
+                            </div>
+                            <div class="flex justify-end gap-3 pt-4 border-t border-slate-100">
+                                <button type="button" onclick="window.app.closeModal()" class="bg-slate-100 hover:bg-slate-200 px-4 py-2 rounded-xl">Cancelar</button>
+                                <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl">Agregar alumno</button>
                             </div>
                         </form>
                     </div>
@@ -1515,6 +2038,82 @@
                 }
             },
 
+            showToast: (message, type = 'success', duration = 4000) => {
+                const container = document.getElementById('toast-container');
+                if (!container) return;
+                
+                const toastId = 'toast_' + Date.now();
+                const bgClass = type === 'success' ? 'bg-emerald-500' : type === 'error' ? 'bg-red-500' : 'bg-blue-500';
+                const iconClass = type === 'success' ? 'check-circle-2' : type === 'error' ? 'alert-circle' : 'info';
+                
+                const toast = document.createElement('div');
+                toast.id = toastId;
+                toast.className = `toast ${bgClass} text-white px-6 py-4 rounded-lg shadow-lg flex items-center gap-3 max-w-sm`;
+                toast.innerHTML = `<i data-lucide="${iconClass}" class="w-5 h-5 flex-shrink-0"></i><span class="text-sm font-medium flex-grow">${message}</span>`;
+                
+                container.appendChild(toast);
+                lucide.createIcons();
+                
+                setTimeout(() => {
+                    toast.classList.add('out');
+                    setTimeout(() => toast.remove(), 300);
+                }, duration);
+            },
+
+            setSearchQuery: (field, query) => {
+                state[field] = query.toLowerCase();
+                renderView();
+            },
+
+            filterStudents: (query) => {
+                const grade = state.formSelection.grade;
+                if (!grade) return;
+                
+                const allStudents = state.adminData.students[grade] || [];
+                const filteredStudents = allStudents.filter(s => s.name.toLowerCase().includes((query||'').toLowerCase()));
+                const dropdown = document.getElementById('student-dropdown');
+                
+                if (!dropdown) return;
+                
+                if (query.trim() === '' || filteredStudents.length === 0) {
+                    dropdown.classList.add('hidden');
+                    return;
+                }
+                
+                let html = '';
+                filteredStudents.forEach(student => {
+                    html += `<div class="px-4 py-3 hover:bg-blue-50 cursor-pointer border-b border-slate-100 transition-colors" onclick="window.app.selectStudent('${student.name}')"><span class="font-medium text-slate-700">${student.name}</span></div>`;
+                });
+                
+                dropdown.innerHTML = html;
+                dropdown.classList.remove('hidden');
+            },
+
+            toggleStudentDropdown: () => {
+                const grade = state.formSelection.grade;
+                if (!grade) return alert('Selecciona primero un grado.');
+                const allStudents = state.adminData.students[grade] || [];
+                const dropdown = document.getElementById('student-dropdown');
+                if (!dropdown) return;
+                if (dropdown.classList.contains('hidden')) {
+                    if (allStudents.length === 0) {
+                        dropdown.innerHTML = `<div class="p-4 text-sm text-slate-500">No hay alumnos en este grado.</div>`;
+                    } else {
+                        dropdown.innerHTML = allStudents.map(s => `<div class="px-4 py-3 hover:bg-blue-50 cursor-pointer border-b border-slate-100 transition-colors" onclick="window.app.selectStudent('${s.name}')"><span class="font-medium text-slate-700">${s.name}</span></div>`).join('');
+                    }
+                    dropdown.classList.remove('hidden');
+                } else {
+                    dropdown.classList.add('hidden');
+                }
+            },
+
+            selectStudent: (studentName) => {
+                document.getElementById('form-student-search').value = studentName;
+                document.getElementById('form-student').value = studentName;
+                document.getElementById('student-dropdown').classList.add('hidden');
+                window.app.updateOrderFormUI('Escuela');
+            },
+
             setView: (view) => {
                 state.view = view;
                 state.formSelection.grade = ''; 
@@ -1570,6 +2169,57 @@
             setAdminOrderDay: (day) => { state.adminOrderDay = day; renderView(); },
             setAdminOrderGrade: (grade) => { state.adminOrderGrade = grade; renderView(); },
             setAdminTab: (tab) => { state.adminTab = tab; renderView(); },
+            setMenuConfigTab: (tab) => { state.menuConfigTab = tab; renderView(); },
+            setMenuConfigSearch: (value) => { state.menuConfigSearch = value; renderView(); },
+            saveCurrentMenuTemplate: () => {
+                const name = prompt('Nombre para la plantilla de menú:');
+                if (!name || !name.trim()) return;
+                const templateName = name.trim();
+                const exists = state.adminData.menuTemplates.find(t => t.name.toLowerCase() === templateName.toLowerCase());
+                if (exists && !confirm('Ya existe una plantilla con este nombre. ¿Deseas reemplazarla?')) return;
+
+                const newTemplate = {
+                    id: 'tmpl_' + Date.now(),
+                    name: templateName,
+                    menu: JSON.parse(JSON.stringify(state.draftMenu))
+                };
+
+                if (exists) {
+                    state.adminData.menuTemplates = state.adminData.menuTemplates.map(t => t.id === exists.id ? newTemplate : t);
+                } else {
+                    state.adminData.menuTemplates.push(newTemplate);
+                }
+
+                const fullData = getFullLocalData();
+                fullData.adminData = state.adminData;
+                saveFullLocalData(fullData); loadLocalData(); renderView();
+                window.app.showToast('Plantilla guardada correctamente', 'success');
+            },
+            applyMenuTemplate: (templateId) => {
+                const template = state.adminData.menuTemplates.find(t => t.id === templateId);
+                if (!template) return;
+                state.draftMenu = JSON.parse(JSON.stringify(template.menu));
+                renderView();
+                window.app.showToast(`Plantilla ${template.name} aplicada`, 'success');
+            },
+            deleteMenuTemplate: (templateId) => {
+                const template = state.adminData.menuTemplates.find(t => t.id === templateId);
+                if (!template) return;
+                if (!confirm(`¿Eliminar la plantilla ${template.name}?`)) return;
+                state.adminData.menuTemplates = state.adminData.menuTemplates.filter(t => t.id !== templateId);
+                const fullData = getFullLocalData();
+                fullData.adminData = state.adminData;
+                saveFullLocalData(fullData); loadLocalData(); renderView();
+            },
+            setReportPeriod: (period) => { state.reportPeriod = period; renderView(); },
+            setReportDay: (day) => { state.reportDay = day; renderView(); },
+            exportReport: (format) => {
+                const reportCycle = state.cycles.find(c => c.id === state.reportCycleId) || getActiveCycle();
+                const reportWeek = reportCycle ? reportCycle.weeks.find(w => w.id === state.reportWeekId) : null;
+                const reportData = getReportOrders(reportCycle, reportWeek, state.reportPeriod, state.reportDay);
+                if (format === 'csv') exportReportCsv(reportData);
+                else if (format === 'pdf') exportReportPdf(reportData);
+            },
 
             setManagingCycle: (cycleId) => {
                 state.managingCycleId = cycleId;
@@ -1689,8 +2339,11 @@
                 if (targetWeek) {
                     targetWeek.menu = state.draftMenu; 
                     targetWeek.inactiveDays = state.draftInactiveDays;
-                    saveFullLocalData(fullData); loadLocalData();
-                    alert("¡Menú de la semana actualizado!"); renderView();
+                    saveFullLocalData(fullData);
+                    window.app.showToast("✓ Menú de la semana actualizado exitosamente!", "success");
+                    renderView();
+                } else {
+                    window.app.showToast("Error al guardar el menú", "error");
                 }
             },
 
@@ -1935,22 +2588,37 @@
                 const targetWeek = targetCycle?.weeks.find(w => w.id === targetWeekId);
 
                 if (targetWeek && targetWeek.inactiveDays && targetWeek.inactiveDays.includes(dayFor)) {
-                    alert("No se pueden realizar pedidos en un día inhábil.");
+                    window.app.showToast("No se pueden realizar pedidos en un día inhábil.", "error");
                     return;
                 }
                 
                 if (!grade || !studentName || (!foodRadio && !drinkRadio)) {
-                    alert("Por favor completa los datos y selecciona al menos un alimento o bebida.");
+                    window.app.showToast("Completa los datos y selecciona al menos un alimento o bebida.", "error");
+                    return;
+                }
+
+                // Validación de duplicados: verificar si el alumno ya tiene pedido para este día
+                const existingOrder = targetWeek?.orders?.find(o => 
+                    o.studentName === studentName && 
+                    o.dayFor === dayFor && 
+                    o.status === 'pendiente'
+                );
+                
+                if (existingOrder) {
+                    window.app.showToast(`${studentName} ya tiene un pedido pendiente para el ${dayFor}.`, "error");
                     return;
                 }
 
                 const breakfastType = [foodRadio?.value, drinkRadio?.value].filter(Boolean).join(' + ');
-
+                const now = new Date();
                 const orderData = {
                     id: 'ord_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
                     source, dayFor, grade, studentName,
                     breakfastType: breakfastType, paymentStatus: paymentStatus, 
-                    status: 'pendiente', timestamp: Date.now()
+                    status: 'pendiente', 
+                    timestamp: Date.now(),
+                    createdAt: now.toISOString(),
+                    history: [{ status: 'pendiente', date: now.toISOString(), note: 'Pedido creado' }]
                 };
 
                 if (targetWeek) {
@@ -1958,10 +2626,10 @@
                     saveFullLocalData(fullData); loadLocalData();
                     state.formSelection.grade = source === 'Casa' ? '' : grade; 
                     state.formSelection.payment = 'Pagado';
-                    alert("¡Pedido guardado con éxito!");
+                    window.app.showToast("✓ Pedido guardado con éxito!", "success");
                     renderView();
                 } else {
-                    alert("Error interno: No se pudo localizar la semana activa para guardar el pedido.");
+                    window.app.showToast("Error: No se pudo localizar la semana activa.", "error");
                 }
             },
 
@@ -2049,14 +2717,41 @@
             },
 
             setSearch: (type, val) => {
-                if (type === 'student') state.adminStudentSearch = val;
-                else if (type === 'alimento') state.adminAlimentoSearch = val;
-                else if (type === 'bebida') state.adminBebidaSearch = val;
-                renderView();
+                if (type === 'student') {
+                    state.adminStudentSearch = val;
+                    state.adminStudentSuggestionOpen = !!val.trim();
+                    updateAdminStudentSearchUI();
+                }
+                else if (type === 'alimento') {
+                    state.adminAlimentoSearch = val;
+                    renderView();
+                }
+                else if (type === 'bebida') {
+                    state.adminBebidaSearch = val;
+                    renderView();
+                }
                 setTimeout(() => {
-                    const input = document.querySelector(`input[placeholder="Buscar ${type}..."]`);
-                    if(input) { input.focus(); input.selectionStart = input.selectionEnd = input.value.length; }
+                    const idMap = { student: 'admin-student-search', alimento: 'admin-alimento-search', bebida: 'admin-bebida-search' };
+                    const input = document.getElementById(idMap[type]) || document.querySelector(`input[placeholder^="Buscar"]`);
+                    if (input) { input.focus(); input.selectionStart = input.selectionEnd = input.value.length; }
                 }, 0);
+            },
+
+            selectStudentSuggestion: (studentId) => {
+                const students = state.adminData.students[state.adminSelectedGrade] || [];
+                const student = students.find(s => s.id === studentId);
+                if (student) {
+                    state.adminStudentSearch = student.name;
+                    state.adminStudentSuggestionOpen = false;
+                    updateAdminStudentSearchUI();
+                    setTimeout(() => {
+                        const input = document.getElementById('admin-student-search');
+                        if (input) {
+                            input.focus();
+                            input.selectionStart = input.selectionEnd = input.value.length;
+                        }
+                    }, 0);
+                }
             },
 
             adminSelectGrade: (grade) => {
@@ -2168,7 +2863,7 @@
 
             addAdminItem: (e, type) => {
                 e.preventDefault();
-                const fullData = getFullLocalData();
+                const fullData = getFullLocalData() || { cycles: state.cycles || [], activeCycleId: state.activeCycleId, activeWeekId: state.activeWeekId, adminData: state.adminData || {} };
                 let needsSave = false;
 
                 if (type === 'grade') {
@@ -2182,46 +2877,65 @@
                 } 
                 else if (type === 'student') {
                     const input = document.getElementById('new-student-input');
-                    const rawVal = input.value;
-                    const lines = rawVal.split(/[\n]+/).map(i => i.trim()).filter(i => i !== '');
-                    
-                    if (lines.length > 0 && state.adminSelectedGrade) {
+                    const rawVal = input ? input.value : '';
+                    const lines = rawVal.split(/\r?\n/).map(i => i.trim()).filter(i => i !== '');
+
+                    if (!state.adminSelectedGrade) {
+                        alert('Selecciona primero un grado antes de cargar alumnos.');
+                    } else if (lines.length > 0) {
                         if (!state.adminData.students[state.adminSelectedGrade]) state.adminData.students[state.adminSelectedGrade] = [];
                         
+                        let parsedCount = 0;
                         lines.forEach(line => {
-                            const curpMatch = line.match(/^([A-Z0-9]{18})\s+(.*)$/i);
+                            const normalizedLine = line.replace(/\s+/g, ' ').trim();
+                            const curpMatch = normalizedLine.match(/^([A-Z0-9]{18})\s+(.+)$/i);
                             let newStudent = null;
 
                             if (curpMatch) {
                                 const curp = curpMatch[1].toUpperCase();
-                                const rest = curpMatch[2];
-                                let apPaterno = '', apMaterno = '', nombres = '';
-                                
-                                const slashIdx = rest.indexOf('/');
-                                const starIdx = rest.indexOf('*');
-                                
-                                if (slashIdx > -1 && starIdx > slashIdx) {
-                                    apPaterno = rest.substring(0, slashIdx).trim();
-                                    apMaterno = rest.substring(slashIdx + 1, starIdx).trim();
-                                    nombres = rest.substring(starIdx + 1).trim();
+                                const rest = curpMatch[2].trim();
+                                const nameMatch = rest.match(/^(.+?)\s*\/\s*(.+?)\s*\*\s*(.+)$/);
+                                if (nameMatch) {
+                                    const apPaterno = nameMatch[1].trim();
+                                    const apMaterno = nameMatch[2].trim();
+                                    const nombres = nameMatch[3].trim();
                                     const fullName = `${nombres} ${apPaterno} ${apMaterno}`.trim().replace(/\s+/g, ' ');
-                                    
+
                                     newStudent = {
                                         id: 'stu_' + Date.now() + Math.random().toString(36).substr(2, 5),
-                                        name: fullName, curp: curp, password: curp.substring(0, 10), isBlocked: false
+                                        name: fullName,
+                                        curp: curp,
+                                        password: curp.substring(0, 10),
+                                        isBlocked: false
                                     };
                                 } else {
-                                    newStudent = { id: 'stu_' + Date.now() + Math.random().toString(36).substr(2, 5), name: rest, curp: curp, password: curp.substring(0, 10), isBlocked: false };
+                                    newStudent = {
+                                        id: 'stu_' + Date.now() + Math.random().toString(36).substr(2, 5),
+                                        name: rest,
+                                        curp: curp,
+                                        password: curp.substring(0, 10),
+                                        isBlocked: false
+                                    };
                                 }
                             } else {
-                                newStudent = { id: 'stu_' + Date.now() + Math.random().toString(36).substr(2, 5), name: line, curp: '', password: '', isBlocked: false };
+                                newStudent = {
+                                    id: 'stu_' + Date.now() + Math.random().toString(36).substr(2, 5),
+                                    name: normalizedLine,
+                                    curp: '',
+                                    password: '',
+                                    isBlocked: false
+                                };
                             }
                             
                             state.adminData.students[state.adminSelectedGrade].push(newStudent);
                             needsSave = true;
+                            parsedCount += 1;
                         });
+                        if (parsedCount === 0) {
+                            alert('No se encontraron líneas válidas para cargar. Revisa el formato CURP Apellido/Materno*Nombre.');
+                        }
                     }
-                } 
+                }
                 else if (type === 'alimento' || type === 'bebida') {
                     const inputId = type === 'alimento' ? 'new-alimento-input' : 'new-bebida-input';
                     const input = document.getElementById(inputId);
@@ -2244,22 +2958,57 @@
 
             addSingleStudent: (e) => {
                 e.preventDefault();
-                if(!state.adminSelectedGrade) return;
+                if(!state.adminSelectedGrade) {
+                    alert('Selecciona primero un grado antes de agregar un alumno.');
+                    return;
+                }
 
-                const name = document.getElementById('ind-nombre').value.trim();
-                const curp = document.getElementById('ind-curp').value.trim().toUpperCase();
-                const pwd = document.getElementById('ind-pwd').value.trim();
+                let nameVal = (document.getElementById('ind-nombre').value || '').trim();
+                let curpVal = (document.getElementById('ind-curp').value || '').trim().toUpperCase();
+                let pwdVal = (document.getElementById('ind-pwd').value || '').trim();
 
-                if(!name || !pwd) return;
+                // Si el campo de nombre contiene CURP + resto, extraer CURP
+                const combinedMatch = nameVal.match(/^([A-Z0-9]{18})\s+(.+)$/i);
+                if (combinedMatch) {
+                    curpVal = combinedMatch[1].toUpperCase();
+                    nameVal = combinedMatch[2].trim();
+                }
 
-                const newStudent = { id: 'stu_' + Date.now() + Math.random().toString(36).substr(2, 5), name: name, curp: curp, password: pwd, isBlocked: false };
+                // Si el nombre viene en formato APELLIDO/APE*MOMBRE, parsearlo
+                const nameFmtMatch = nameVal.match(/^(.+?)\s*\/\s*(.+?)\s*\*\s*(.+)$/);
+                if (nameFmtMatch) {
+                    const apPaterno = nameFmtMatch[1].trim();
+                    const apMaterno = nameFmtMatch[2].trim();
+                    const nombres = nameFmtMatch[3].trim();
+                    nameVal = `${nombres} ${apPaterno} ${apMaterno}`.replace(/\s+/g, ' ').trim();
+                }
 
-                const fullData = getFullLocalData();
+                // Si no hay contraseña pero sí CURP, autocompletar con primeros 10 caracteres
+                if ((!pwdVal || pwdVal === '') && curpVal && curpVal.length >= 10) {
+                    pwdVal = curpVal.substring(0, 10);
+                    const pwdInput = document.getElementById('ind-pwd'); if (pwdInput) pwdInput.value = pwdVal;
+                }
+
+                if (!nameVal || !pwdVal) {
+                    alert('Nombre y contraseña son obligatorios. Si no hay contraseña, ingresa CURP para autocompletar.');
+                    return;
+                }
+
+                const newStudent = { id: 'stu_' + Date.now() + Math.random().toString(36).substr(2, 5), name: nameVal, curp: curpVal, password: pwdVal, isBlocked: false };
+
+                const fullData = getFullLocalData() || { cycles: state.cycles || [], activeCycleId: state.activeCycleId, activeWeekId: state.activeWeekId, adminData: state.adminData || {} };
                 if (!state.adminData.students[state.adminSelectedGrade]) state.adminData.students[state.adminSelectedGrade] = [];
                 state.adminData.students[state.adminSelectedGrade].push(newStudent);
                 
                 fullData.adminData = state.adminData;
                 saveFullLocalData(fullData); loadLocalData(); renderView();
+            },
+
+            prefillStudentPwd: (val) => {
+                const curp = (val || '').trim().toUpperCase();
+                const pwdInput = document.getElementById('ind-pwd');
+                if (!pwdInput) return;
+                if (curp.length >= 10) pwdInput.value = curp.substring(0, 10);
             },
 
             toggleAllCatalog: (catalogType, checked) => {
@@ -2336,7 +3085,21 @@
                     }
                 }
 
-                if (needsSave) { fullData.adminData = state.adminData; saveFullLocalData(fullData); loadLocalData(); renderView(); }
+                let toastMessage = null;
+                if (needsSave) { 
+                    fullData.adminData = state.adminData; 
+                    saveFullLocalData(fullData); loadLocalData(); renderView(); 
+                    if (typeof parsedCount !== 'undefined' && parsedCount > 0) {
+                        toastMessage = parsedCount === 1 ? '1 alumno añadido' : parsedCount + ' alumnos añadidos';
+                    } else if (type === 'grade') {
+                        toastMessage = 'Grado añadido';
+                    } else if (type === 'alimento') {
+                        toastMessage = 'Alimentos añadidos';
+                    } else if (type === 'bebida') {
+                        toastMessage = 'Bebidas añadidas';
+                    }
+                }
+                if (toastMessage && window.app && window.app.showToast) window.app.showToast(toastMessage);
             },
 
             deleteAdminItem: (type, itemVal) => {
@@ -2396,6 +3159,19 @@
 
         // Arrancamos Firebase
         initFirebase();
+
+        // Cerrar dropdown de alumnos al hacer clic fuera
+        document.addEventListener('click', (e) => {
+            const dropdown = document.getElementById('student-dropdown');
+            if (!dropdown || dropdown.classList.contains('hidden')) return;
+            const search = document.getElementById('form-student-search');
+            const toggleBtn = document.querySelector('button[onclick="window.app.toggleStudentDropdown()"]');
+            const target = e.target;
+            if (search && (search === target || search.contains(target))) return;
+            if (toggleBtn && (toggleBtn === target || toggleBtn.contains(target))) return;
+            if (dropdown.contains(target)) return;
+            dropdown.classList.add('hidden');
+        });
 
     </script>
 </body>
