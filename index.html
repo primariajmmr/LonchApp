@@ -151,6 +151,8 @@ const DEFAULT_ORDER_PRICE = 35;
             adminStudentSuggestionOpen: false,
             adminAlimentoSearch: '',
             adminBebidaSearch: '',
+            adminAlimentosCollapsed: false,
+            adminBebidasCollapsed: false,
             
             schoolOrderSearch: '', // Búsqueda en pedidos de escuela
             
@@ -519,6 +521,39 @@ const DEFAULT_ORDER_PRICE = 35;
             }
         }
 
+        function updateAdminCatalogSearchUI() {
+            const searchAlimento = (state.adminAlimentoSearch || '').trim().toLowerCase();
+            const searchBebida = (state.adminBebidaSearch || '').trim().toLowerCase();
+            const filteredAlimentos = state.adminData.alimentos.filter(item => item.toLowerCase().includes(searchAlimento));
+            const filteredBebidas = state.adminData.bebidas.filter(item => item.toLowerCase().includes(searchBebida));
+
+            const alimentoListContainer = document.getElementById('admin-alimento-list');
+            if (alimentoListContainer) {
+                alimentoListContainer.innerHTML = filteredAlimentos.length > 0 ? filteredAlimentos.map(item => `
+                    <div class="flex items-center justify-between gap-3 bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm text-slate-700">
+                        <span>${item}</span>
+                        <div class="flex gap-2">
+                            <button type="button" onclick="window.app.editAdminItem('alimento', '${item.replace(/'/g, "\\'")}')" class="px-3 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 hover:bg-slate-100">Editar</button>
+                            <button type="button" onclick="window.app.deleteAdminItem('alimento', '${item.replace(/'/g, "\\'")}')" class="px-3 py-2 rounded-xl bg-red-500 text-white hover:bg-red-600">Eliminar</button>
+                        </div>
+                    </div>
+                `).join('') : '<p class="text-slate-500 text-sm">No hay alimentos registrados.</p>';
+            }
+
+            const bebidaListContainer = document.getElementById('admin-bebida-list');
+            if (bebidaListContainer) {
+                bebidaListContainer.innerHTML = filteredBebidas.length > 0 ? filteredBebidas.map(item => `
+                    <div class="flex items-center justify-between gap-3 bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm text-slate-700">
+                        <span>${item}</span>
+                        <div class="flex gap-2">
+                            <button type="button" onclick="window.app.editAdminItem('bebida', '${item.replace(/'/g, "\\'")}')" class="px-3 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 hover:bg-slate-100">Editar</button>
+                            <button type="button" onclick="window.app.deleteAdminItem('bebida', '${item.replace(/'/g, "\\'")}')" class="px-3 py-2 rounded-xl bg-red-500 text-white hover:bg-red-600">Eliminar</button>
+                        </div>
+                    </div>
+                `).join('') : '<p class="text-slate-500 text-sm">No hay bebidas registradas.</p>';
+            }
+        }
+
         // --- VISTAS ---
         function renderHomeView() {
             const activeWeek = getActiveWeek();
@@ -527,7 +562,7 @@ const DEFAULT_ORDER_PRICE = 35;
 
             // Estado de conexión discreto para Firebase
             const dbStatusHtml = state.dbConnected 
-                ? '<span class="text-emerald-500 inline-flex flex-col items-center gap-0.5"><span class="inline-flex items-center gap-1"><i data-lucide="cloud-check" class="w-3 h-3"></i> Conectado a Firebase</span><span class="text-xs opacity-60">v5.2</span></span>'
+                ? '<span class="text-emerald-500 inline-flex flex-col items-center gap-0.5"><span class="inline-flex items-center gap-1"><i data-lucide="cloud-check" class="w-3 h-3"></i> Conectado a Firebase</span><span class="text-xs opacity-60">v5.3</span></span>'
                 : '<span class="text-amber-500 inline-flex items-center gap-1"><i data-lucide="cloud-off" class="w-3 h-3 animate-pulse"></i> Conectando...</span>';
 
             return `
@@ -1269,7 +1304,7 @@ const DEFAULT_ORDER_PRICE = 35;
                         <h3 class="font-bold text-2xl text-slate-900 flex items-center gap-2">
                             <i data-lucide="database" class="w-6 h-6 text-slate-600"></i> Administración del Sistema
                         </h3>
-                        <p class="text-slate-500 text-sm mt-1">Gestiona ciclos, catálogos, reportes y accesos. <span class="text-slate-300 text-xs">v5.2</span></p>
+                        <p class="text-slate-500 text-sm mt-1">Gestiona ciclos, catálogos, reportes y accesos. <span class="text-slate-300 text-xs">v5.3</span></p>
                     </div>
 
                     ${tabButtons}
@@ -1610,6 +1645,11 @@ const DEFAULT_ORDER_PRICE = 35;
         }
 
         function renderAdminTabAlimentosYBebidas() {
+            const searchAlimento = (state.adminAlimentoSearch || '').trim().toLowerCase();
+            const searchBebida = (state.adminBebidaSearch || '').trim().toLowerCase();
+            const filteredAlimentos = state.adminData.alimentos.filter(item => item.toLowerCase().includes(searchAlimento));
+            const filteredBebidas = state.adminData.bebidas.filter(item => item.toLowerCase().includes(searchBebida));
+
             return `
                 <div class="space-y-6">
                     <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -1619,7 +1659,23 @@ const DEFAULT_ORDER_PRICE = 35;
                                 <textarea id="new-alimento-input" rows="3" placeholder="Ej. Torta, Sándwich (separa con comas)" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 text-sm outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 resize-none" required></textarea>
                                 <button type="submit" class="w-full bg-amber-600 hover:bg-amber-700 text-white py-3 rounded-lg font-semibold transition-colors">Añadir Alimentos</button>
                             </form>
-                            <div class="text-center py-4 text-slate-500 text-sm">Gestión de alimentos disponible</div>
+                            <div class="mb-4 space-y-3">
+                                <input id="admin-alimento-search" type="text" value="${state.adminAlimentoSearch || ''}" oninput="window.app.setSearch('alimento', this.value)" placeholder="Buscar alimentos..." class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200">
+                                <button type="button" onclick="window.app.toggleAdminCatalogCollapse('alimentos')" class="text-slate-500 text-xs font-semibold uppercase tracking-[0.18em] hover:text-slate-700 transition">
+                                    ${state.adminAlimentosCollapsed ? 'Mostrar listado de alimentos' : 'Ocultar listado de alimentos'}
+                                </button>
+                            </div>
+                            <div id="admin-alimento-list" class="space-y-2" style="display: ${state.adminAlimentosCollapsed ? 'none' : 'block'};">
+                                ${filteredAlimentos.length > 0 ? filteredAlimentos.map(item => `
+                                    <div class="flex items-center justify-between gap-3 bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm text-slate-700">
+                                        <span>${item}</span>
+                                        <div class="flex gap-2">
+                                            <button type="button" onclick="window.app.editAdminItem('alimento', '${item.replace(/'/g, "\\'")}')" class="px-3 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 hover:bg-slate-100">Editar</button>
+                                            <button type="button" onclick="window.app.deleteAdminItem('alimento', '${item.replace(/'/g, "\\'")}')" class="px-3 py-2 rounded-xl bg-red-500 text-white hover:bg-red-600">Eliminar</button>
+                                        </div>
+                                    </div>
+                                `).join('') : '<p class="text-slate-500 text-sm">No hay alimentos registrados.</p>'}
+                            </div>
                         </div>
 
                         <div class="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
@@ -1628,7 +1684,23 @@ const DEFAULT_ORDER_PRICE = 35;
                                 <textarea id="new-bebida-input" rows="3" placeholder="Ej. Jugo de Naranja, Leche con Chocolate (separa con comas)" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 text-sm outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 resize-none" required></textarea>
                                 <button type="submit" class="w-full bg-sky-600 hover:bg-sky-700 text-white py-3 rounded-lg font-semibold transition-colors">Añadir Bebidas</button>
                             </form>
-                            <div class="text-center py-4 text-slate-500 text-sm">Gestión de bebidas disponible</div>
+                            <div class="mb-4 space-y-3">
+                                <input id="admin-bebida-search" type="text" value="${state.adminBebidaSearch || ''}" oninput="window.app.setSearch('bebida', this.value)" placeholder="Buscar bebidas..." class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-200">
+                                <button type="button" onclick="window.app.toggleAdminCatalogCollapse('bebidas')" class="text-slate-500 text-xs font-semibold uppercase tracking-[0.18em] hover:text-slate-700 transition">
+                                    ${state.adminBebidasCollapsed ? 'Mostrar listado de bebidas' : 'Ocultar listado de bebidas'}
+                                </button>
+                            </div>
+                            <div id="admin-bebida-list" class="space-y-2" style="display: ${state.adminBebidasCollapsed ? 'none' : 'block'};">
+                                ${filteredBebidas.length > 0 ? filteredBebidas.map(item => `
+                                    <div class="flex items-center justify-between gap-3 bg-slate-50 border border-slate-200 rounded-2xl px-4 py-3 text-sm text-slate-700">
+                                        <span>${item}</span>
+                                        <div class="flex gap-2">
+                                            <button type="button" onclick="window.app.editAdminItem('bebida', '${item.replace(/'/g, "\\'")}')" class="px-3 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 hover:bg-slate-100">Editar</button>
+                                            <button type="button" onclick="window.app.deleteAdminItem('bebida', '${item.replace(/'/g, "\\'")}')" class="px-3 py-2 rounded-xl bg-red-500 text-white hover:bg-red-600">Eliminar</button>
+                                        </div>
+                                    </div>
+                                `).join('') : '<p class="text-slate-500 text-sm">No hay bebidas registradas.</p>'}
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -2724,17 +2796,26 @@ const DEFAULT_ORDER_PRICE = 35;
                 }
                 else if (type === 'alimento') {
                     state.adminAlimentoSearch = val;
-                    renderView();
+                    updateAdminCatalogSearchUI();
                 }
                 else if (type === 'bebida') {
                     state.adminBebidaSearch = val;
-                    renderView();
+                    updateAdminCatalogSearchUI();
                 }
                 setTimeout(() => {
                     const idMap = { student: 'admin-student-search', alimento: 'admin-alimento-search', bebida: 'admin-bebida-search' };
                     const input = document.getElementById(idMap[type]) || document.querySelector(`input[placeholder^="Buscar"]`);
                     if (input) { input.focus(); input.selectionStart = input.selectionEnd = input.value.length; }
                 }, 0);
+            },
+
+            toggleAdminCatalogCollapse: (catalogType) => {
+                if (catalogType === 'alimentos') {
+                    state.adminAlimentosCollapsed = !state.adminAlimentosCollapsed;
+                } else if (catalogType === 'bebidas') {
+                    state.adminBebidasCollapsed = !state.adminBebidasCollapsed;
+                }
+                renderView();
             },
 
             selectStudentSuggestion: (studentId) => {
