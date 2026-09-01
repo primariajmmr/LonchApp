@@ -66,7 +66,7 @@
         <div id="modal-container"></div>
         
         <!-- Toast Notifications Container -->
-        <div id="toast-container" class="fixed top-4 right-4 z-40 space-y-2 max-w-sm"></div>
+        <div id="toast-container" class="fixed top-4 right-4 z-[60] space-y-2 max-w-sm"></div>
     </div>
 
     <!-- Logic Script (Type Module for Firebase) -->
@@ -139,7 +139,8 @@ const DEFAULT_ORDER_PRICE = 35;
             
             adminSelectedGrade: '',
             adminStudentAddMode: 'masivo', 
-            editingStudent: null, 
+            editingStudent: null,
+            editingGrade: null,
             loggedStudent: null,  
             
             formSelection: { day: null, grade: '', payment: 'Pagado' },
@@ -562,7 +563,7 @@ const DEFAULT_ORDER_PRICE = 35;
 
             // Estado de conexión discreto para Firebase
             const dbStatusHtml = state.dbConnected 
-                ? '<span class="text-emerald-500 inline-flex flex-col items-center gap-0.5"><span class="inline-flex items-center gap-1"><i data-lucide="cloud-check" class="w-3 h-3"></i> Conectado a Firebase</span><span class="text-xs opacity-60">v5.3</span></span>'
+                ? '<span class="text-emerald-500 inline-flex flex-col items-center gap-0.5"><span class="inline-flex items-center gap-1"><i data-lucide="cloud-check" class="w-3 h-3"></i> Conectado a Firebase</span><span class="text-xs opacity-60">v5.5</span></span>'
                 : '<span class="text-amber-500 inline-flex items-center gap-1"><i data-lucide="cloud-off" class="w-3 h-3 animate-pulse"></i> Conectando...</span>';
 
             return `
@@ -904,7 +905,7 @@ const DEFAULT_ORDER_PRICE = 35;
                             <form onsubmit="window.app.loginCasa(event)" class="space-y-4">
                                 <div>
                                     <label class="block text-sm font-semibold text-slate-700 mb-1">Clave del Alumno</label>
-                                    <input type="password" id="casa-login-pwd" placeholder="Los 10 primeros dígitos de la CURP" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200 transition-all text-slate-700" required>
+                                    <input type="text" id="casa-login-pwd" placeholder="Los 10 primeros dígitos de la CURP" maxlength="10" oninput="this.value = this.value.toUpperCase().slice(0,10)" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-200 transition-all text-slate-700" required>
                                 </div>
                                 <button type="submit" class="w-full bg-amber-600 hover:bg-amber-700 text-white py-3.5 rounded-xl font-bold text-lg transition-colors flex items-center justify-center gap-2 shadow-sm">
                                     <i data-lucide="log-in" class="w-5 h-5"></i> Ingresar
@@ -1304,7 +1305,7 @@ const DEFAULT_ORDER_PRICE = 35;
                         <h3 class="font-bold text-2xl text-slate-900 flex items-center gap-2">
                             <i data-lucide="database" class="w-6 h-6 text-slate-600"></i> Administración del Sistema
                         </h3>
-                        <p class="text-slate-500 text-sm mt-1">Gestiona ciclos, catálogos, reportes y accesos. <span class="text-slate-300 text-xs">v5.3</span></p>
+                        <p class="text-slate-500 text-sm mt-1">Gestiona ciclos, catálogos, reportes y accesos. <span class="text-slate-300 text-xs">v5.5</span></p>
                     </div>
 
                     ${tabButtons}
@@ -1319,6 +1320,7 @@ const DEFAULT_ORDER_PRICE = 35;
         // Renderizar Modal Activo
         function renderActiveModal() {
             if (state.editingStudent) return renderEditStudentModal();
+            if (state.editingGrade !== null) return renderEditGradeModal();
             if (!state.activeModal) return '';
             
             if (state.activeModal === 'create-cycle') return renderCreateCycleModal();
@@ -1852,6 +1854,31 @@ const DEFAULT_ORDER_PRICE = 35;
             `;
         }
 
+        // Modal Editar Grado
+        function renderEditGradeModal() {
+            if (state.editingGrade === null) return '';
+            return `
+                <div class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 fade-in">
+                    <div class="bg-white rounded-2xl p-6 w-full max-w-md shadow-2xl border border-slate-100">
+                        <div class="flex justify-between items-center mb-6">
+                            <h3 class="text-xl font-bold text-slate-900 flex items-center gap-2"><i data-lucide="edit-3" class="w-6 h-6 text-blue-600"></i> Editar Grado</h3>
+                            <button onclick="window.app.closeEditGradeModal()" class="text-slate-400 hover:text-slate-600 transition-colors"><i data-lucide="x" class="w-5 h-5"></i></button>
+                        </div>
+                        <form onsubmit="window.app.saveEditedGrade(event)" class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-semibold text-slate-700 mb-2">Nombre del Grado</label>
+                                <input type="text" id="edit-grade-input" value="${state.editingGrade.oldValue}" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all font-semibold text-lg text-center" required autofocus>
+                            </div>
+                            <div class="pt-4 border-t border-slate-100 flex gap-3">
+                                <button type="button" onclick="window.app.closeEditGradeModal()" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 py-2.5 rounded-lg font-semibold transition-colors">Cancelar</button>
+                                <button type="submit" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-lg font-semibold transition-colors">Guardar Cambios</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            `;
+        }
+
         // Modal Editar Alumno
         function renderEditStudentModal() {
             if (!state.editingStudent) return '';
@@ -1873,7 +1900,7 @@ const DEFAULT_ORDER_PRICE = 35;
                             </div>
                             <div>
                                 <label class="block text-sm font-semibold text-slate-700 mb-1">Contraseña (Casa)</label>
-                                <input type="text" id="edit-stu-pwd" value="${state.editingStudent.password}" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 outline-none focus:border-blue-500 font-mono text-sm" required>
+                                <input type="text" id="edit-stu-pwd" value="${state.editingStudent.password}" maxlength="10" oninput="this.value = this.value.toUpperCase().slice(0,10)" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 outline-none focus:border-blue-500 font-mono text-sm uppercase" required>
                             </div>
                             <div class="pt-4 border-t border-slate-100 flex gap-3">
                                 <button type="button" onclick="window.app.closeEditStudentModal()" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 py-2.5 rounded-xl font-semibold transition-colors">Cancelar</button>
@@ -1930,7 +1957,7 @@ const DEFAULT_ORDER_PRICE = 35;
                             </div>
                             <div>
                                 <label class="block text-sm font-semibold text-slate-700 mb-2">Contraseña</label>
-                                <input id="ind-pwd" type="text" placeholder="Contraseña para casa" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" required>
+                                <input id="ind-pwd" type="text" placeholder="Contraseña para casa" maxlength="10" oninput="this.value = this.value.toUpperCase().slice(0,10)" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 uppercase" required>
                             </div>
                             <div class="flex justify-end gap-3 pt-4 border-t border-slate-100">
                                 <button type="button" onclick="window.app.closeModal()" class="bg-slate-100 hover:bg-slate-200 px-4 py-2 rounded-xl">Cancelar</button>
@@ -1940,6 +1967,26 @@ const DEFAULT_ORDER_PRICE = 35;
                     </div>
                 </div>
             `;
+        }
+
+        function normalizeStudentName(name) {
+            return (name || '').trim().replace(/\s+/g, ' ').toLowerCase();
+        }
+
+        function findDuplicateStudentGrade(studentName, studentCurp) {
+            const normalizedName = normalizeStudentName(studentName);
+            const normalizedCurp = (studentCurp || '').trim().toUpperCase();
+
+            const grades = Object.keys(state.adminData.students || {});
+            for (const grade of grades) {
+                const students = state.adminData.students[grade] || [];
+                for (const student of students) {
+                    const sameName = normalizeStudentName(student.name) === normalizedName;
+                    const sameCurp = normalizedCurp && (student.curp || '').trim().toUpperCase() === normalizedCurp;
+                    if (sameName || sameCurp) return grade;
+                }
+            }
+            return null;
         }
 
         window.app = {
@@ -2115,16 +2162,25 @@ const DEFAULT_ORDER_PRICE = 35;
                 if (!container) return;
                 
                 const toastId = 'toast_' + Date.now();
-                const bgClass = type === 'success' ? 'bg-emerald-500' : type === 'error' ? 'bg-red-500' : 'bg-blue-500';
-                const iconClass = type === 'success' ? 'check-circle-2' : type === 'error' ? 'alert-circle' : 'info';
+                const palette = {
+                    success: { bg: 'bg-gradient-to-r from-emerald-500 to-green-500', ring: 'ring-emerald-100', icon: 'check-circle-2' },
+                    error: { bg: 'bg-gradient-to-r from-red-500 to-rose-500', ring: 'ring-red-100', icon: 'alert-circle' },
+                    info: { bg: 'bg-gradient-to-r from-blue-500 to-indigo-500', ring: 'ring-blue-100', icon: 'info' }
+                };
+                const selected = palette[type] || palette.info;
                 
                 const toast = document.createElement('div');
                 toast.id = toastId;
-                toast.className = `toast ${bgClass} text-white px-6 py-4 rounded-lg shadow-lg flex items-center gap-3 max-w-sm`;
-                toast.innerHTML = `<i data-lucide="${iconClass}" class="w-5 h-5 flex-shrink-0"></i><span class="text-sm font-medium flex-grow">${message}</span>`;
+                toast.className = `toast ${selected.bg} text-white px-4 py-3 rounded-2xl shadow-xl ring-2 ${selected.ring} flex items-center gap-3 max-w-sm border border-white/20 backdrop-blur-sm`;
+                toast.innerHTML = `
+                    <div class="flex h-8 w-8 items-center justify-center rounded-full bg-white/15">
+                        <i data-lucide="${selected.icon}" class="w-4 h-4 flex-shrink-0"></i>
+                    </div>
+                    <span class="text-sm font-semibold flex-grow leading-snug">${message}</span>
+                `;
                 
                 container.appendChild(toast);
-                lucide.createIcons();
+                if (window.lucide) window.lucide.createIcons();
                 
                 setTimeout(() => {
                     toast.classList.add('out');
@@ -2194,7 +2250,8 @@ const DEFAULT_ORDER_PRICE = 35;
             
             loginCasa: (e) => {
                 e.preventDefault();
-                const pwd = document.getElementById('casa-login-pwd').value.trim();
+                const pwd = document.getElementById('casa-login-pwd').value.trim().toUpperCase().slice(0, 10);
+                document.getElementById('casa-login-pwd').value = pwd;
                 let foundStudent = null;
                 let foundGrade = null;
                 
@@ -2921,7 +2978,8 @@ const DEFAULT_ORDER_PRICE = 35;
                 
                 const newName = document.getElementById('edit-stu-name').value.trim();
                 const newCurp = document.getElementById('edit-stu-curp').value.trim().toUpperCase();
-                const newPwd = document.getElementById('edit-stu-pwd').value.trim();
+                const newPwd = document.getElementById('edit-stu-pwd').value.trim().toUpperCase().slice(0, 10);
+                document.getElementById('edit-stu-pwd').value = newPwd;
                 
                 if(!newName || !newPwd) return alert("Nombre y contraseña son obligatorios.");
                 
@@ -2939,6 +2997,47 @@ const DEFAULT_ORDER_PRICE = 35;
                     loadLocalData();
                     state.editingStudent = null;
                     renderView();
+                }
+            },
+
+            closeEditGradeModal: () => {
+                state.editingGrade = null;
+                renderView();
+            },
+
+            saveEditedGrade: (e) => {
+                e.preventDefault();
+                if(state.editingGrade === null) return;
+                
+                const newGradeName = document.getElementById('edit-grade-input').value.trim();
+                const oldGradeName = state.editingGrade.oldValue;
+                
+                if(!newGradeName || newGradeName === oldGradeName) {
+                    window.app.closeEditGradeModal();
+                    return;
+                }
+                
+                // Validar que no exista otro grado con ese nombre
+                if(state.adminData.grades.includes(newGradeName)) {
+                    alert("Ya existe un grado con ese nombre.");
+                    return;
+                }
+                
+                const fullData = getFullLocalData();
+                const idx = state.adminData.grades.indexOf(oldGradeName);
+                
+                if(idx > -1) {
+                    state.adminData.grades[idx] = newGradeName;
+                    state.adminData.students[newGradeName] = state.adminData.students[oldGradeName] || [];
+                    delete state.adminData.students[oldGradeName];
+                    if (state.adminSelectedGrade === oldGradeName) state.adminSelectedGrade = newGradeName;
+                    
+                    fullData.adminData = state.adminData;
+                    saveFullLocalData(fullData);
+                    loadLocalData();
+                    state.editingGrade = null;
+                    renderView();
+                    if (window.app && window.app.showToast) window.app.showToast('Grado actualizado exitosamente');
                 }
             },
 
@@ -2960,13 +3059,14 @@ const DEFAULT_ORDER_PRICE = 35;
                     const input = document.getElementById('new-student-input');
                     const rawVal = input ? input.value : '';
                     const lines = rawVal.split(/\r?\n/).map(i => i.trim()).filter(i => i !== '');
+                    let parsedCount = 0;
+                    let duplicateMessages = [];
 
                     if (!state.adminSelectedGrade) {
                         alert('Selecciona primero un grado antes de cargar alumnos.');
                     } else if (lines.length > 0) {
                         if (!state.adminData.students[state.adminSelectedGrade]) state.adminData.students[state.adminSelectedGrade] = [];
                         
-                        let parsedCount = 0;
                         lines.forEach(line => {
                             const normalizedLine = line.replace(/\s+/g, ' ').trim();
                             const curpMatch = normalizedLine.match(/^([A-Z0-9]{18})\s+(.+)$/i);
@@ -3007,13 +3107,36 @@ const DEFAULT_ORDER_PRICE = 35;
                                     isBlocked: false
                                 };
                             }
+
+                            const existingGrade = findDuplicateStudentGrade(newStudent.name, newStudent.curp);
+                            if (existingGrade) {
+                                duplicateMessages.push(`${newStudent.name} no se pudo agregar porque ya aparece en ${existingGrade}.`);
+                                return;
+                            }
                             
                             state.adminData.students[state.adminSelectedGrade].push(newStudent);
                             needsSave = true;
                             parsedCount += 1;
                         });
-                        if (parsedCount === 0) {
+                        if (parsedCount === 0 && duplicateMessages.length === 0) {
                             alert('No se encontraron líneas válidas para cargar. Revisa el formato CURP Apellido/Materno*Nombre.');
+                        }
+                    }
+
+                    if (duplicateMessages.length > 0) {
+                        alert(duplicateMessages.join('\n'));
+                    }
+
+                    if (needsSave) {
+                        fullData.adminData = state.adminData;
+                        saveFullLocalData(fullData);
+                        loadLocalData();
+                        state.activeModal = null;
+                        renderView();
+
+                        if (parsedCount > 0 && window.app && window.app.showToast) {
+                            const message = parsedCount === 1 ? 'Se ha cargado 1 alumno.' : `Se han cargado ${parsedCount} alumnos.`;
+                            window.app.showToast(message, 'success');
                         }
                     }
                 }
@@ -3046,7 +3169,8 @@ const DEFAULT_ORDER_PRICE = 35;
 
                 let nameVal = (document.getElementById('ind-nombre').value || '').trim();
                 let curpVal = (document.getElementById('ind-curp').value || '').trim().toUpperCase();
-                let pwdVal = (document.getElementById('ind-pwd').value || '').trim();
+                let pwdVal = (document.getElementById('ind-pwd').value || '').trim().toUpperCase().slice(0, 10);
+                document.getElementById('ind-pwd').value = pwdVal;
 
                 // Si el campo de nombre contiene CURP + resto, extraer CURP
                 const combinedMatch = nameVal.match(/^([A-Z0-9]{18})\s+(.+)$/i);
@@ -3076,6 +3200,11 @@ const DEFAULT_ORDER_PRICE = 35;
                 }
 
                 const newStudent = { id: 'stu_' + Date.now() + Math.random().toString(36).substr(2, 5), name: nameVal, curp: curpVal, password: pwdVal, isBlocked: false };
+                const duplicateGrade = findDuplicateStudentGrade(newStudent.name, newStudent.curp);
+                if (duplicateGrade) {
+                    alert(`${newStudent.name} no se pudo agregar porque ya aparece en ${duplicateGrade}.`);
+                    return;
+                }
 
                 const fullData = getFullLocalData() || { cycles: state.cycles || [], activeCycleId: state.activeCycleId, activeWeekId: state.activeWeekId, adminData: state.adminData || {} };
                 if (!state.adminData.students[state.adminSelectedGrade]) state.adminData.students[state.adminSelectedGrade] = [];
@@ -3089,7 +3218,8 @@ const DEFAULT_ORDER_PRICE = 35;
                 const curp = (val || '').trim().toUpperCase();
                 const pwdInput = document.getElementById('ind-pwd');
                 if (!pwdInput) return;
-                if (curp.length >= 10) pwdInput.value = curp.substring(0, 10);
+                if (curp.length >= 10) pwdInput.value = curp.substring(0, 10).toUpperCase();
+                pwdInput.value = pwdInput.value.slice(0, 10).toUpperCase();
             },
 
             toggleAllCatalog: (catalogType, checked) => {
@@ -3138,6 +3268,14 @@ const DEFAULT_ORDER_PRICE = 35;
             editAdminItem: (type, oldVal) => {
                 if(type === 'student') return; 
 
+                if (type === 'grade') {
+                    // Abrir modal para editar grado
+                    state.editingGrade = { oldValue: oldVal };
+                    renderView();
+                    return;
+                }
+
+                // Para alimentos y bebidas, mantener el prompt
                 const newVal = prompt("Editar valor:", oldVal);
                 if (newVal === null || newVal.trim() === '' || newVal.trim() === oldVal) return; 
                 
@@ -3145,16 +3283,7 @@ const DEFAULT_ORDER_PRICE = 35;
                 const fullData = getFullLocalData();
                 let needsSave = false;
 
-                if (type === 'grade') {
-                    const idx = state.adminData.grades.indexOf(oldVal);
-                    if (idx > -1) {
-                        state.adminData.grades[idx] = cleanVal;
-                        state.adminData.students[cleanVal] = state.adminData.students[oldVal] || [];
-                        delete state.adminData.students[oldVal];
-                        if (state.adminSelectedGrade === oldVal) state.adminSelectedGrade = cleanVal;
-                        needsSave = true;
-                    }
-                } else if (type === 'alimento' || type === 'bebida') {
+                if (type === 'alimento' || type === 'bebida') {
                     const targetArray = type === 'alimento' ? state.adminData.alimentos : state.adminData.bebidas;
                     const idx = targetArray.indexOf(oldVal);
                     if (idx > -1) {
@@ -3172,8 +3301,6 @@ const DEFAULT_ORDER_PRICE = 35;
                     saveFullLocalData(fullData); loadLocalData(); renderView(); 
                     if (typeof parsedCount !== 'undefined' && parsedCount > 0) {
                         toastMessage = parsedCount === 1 ? '1 alumno añadido' : parsedCount + ' alumnos añadidos';
-                    } else if (type === 'grade') {
-                        toastMessage = 'Grado añadido';
                     } else if (type === 'alimento') {
                         toastMessage = 'Alimentos añadidos';
                     } else if (type === 'bebida') {
