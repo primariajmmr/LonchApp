@@ -115,6 +115,7 @@ const DEFAULT_ORDER_PRICE = 35;
             kitchenDay: 'Lunes', 
             kitchenTab: 'pendientes',
             kitchenGradeFilter: 'Todos', 
+            kitchenOrderSearch: '',
             kitchenSelectedDelivered: [], 
             
             cycles: [],
@@ -125,13 +126,15 @@ const DEFAULT_ORDER_PRICE = 35;
             reportWeekId: null, 
             
             draftMenu: null,
+            draftMenuPrices: {},
             draftInactiveDays: [], 
             adminData: {
                 grades: [], students: {}, alimentos: [], bebidas: [],   
+                itemPricing: {},
                 passwords: {}, contactInfo: { name: '', phone: '' },
                 settings: { homeOrderSchedule: { mode: 'always', days: [1,2,3,4,5], start: '07:00', end: '16:00' } },
                 menuTemplates: [],
-                pricing: { defaultOrder: DEFAULT_ORDER_PRICE }
+                pricing: { defaultOrder: DEFAULT_ORDER_PRICE, defaultFood: 0, defaultDrink: 0 }
             },
             menuConfigSearch: '',
             reportPeriod: 'semanal',
@@ -194,6 +197,17 @@ const DEFAULT_ORDER_PRICE = 35;
         }
 
         function hydrateState(data) {
+            data.cycles?.forEach(cycle => cycle.weeks?.forEach(week => {
+                const orders = week.orders || [];
+                const highestNumber = orders.reduce((highest, order) => {
+                    const number = Number(order.orderNumber);
+                    return Number.isFinite(number) ? Math.max(highest, number) : highest;
+                }, 0);
+                let nextNumber = highestNumber + 1;
+                orders.forEach(order => {
+                    if (!Number.isFinite(Number(order.orderNumber))) order.orderNumber = nextNumber++;
+                });
+            }));
             state.cycles = data.cycles || [];
             state.activeCycleId = data.activeCycleId;
             state.adminData = data.adminData;
@@ -203,11 +217,14 @@ const DEFAULT_ORDER_PRICE = 35;
             
             if (!state.adminData.alimentos) state.adminData.alimentos = [];
             if (!state.adminData.bebidas) state.adminData.bebidas = [];
+            if (!state.adminData.itemPricing) state.adminData.itemPricing = {};
             if (!state.adminData.passwords) state.adminData.passwords = { admin: 'admin', cocina: '', escuela: '' };
             if (!state.adminData.contactInfo) state.adminData.contactInfo = { name: '', phone: '' };
             if (!state.adminData.settings) state.adminData.settings = { homeOrderSchedule: { mode: 'always', days: [1,2,3,4,5], start: '07:00', end: '16:00' } };
             if (!state.adminData.menuTemplates) state.adminData.menuTemplates = [];
-            if (!state.adminData.pricing) state.adminData.pricing = { defaultOrder: DEFAULT_ORDER_PRICE };
+            if (!state.adminData.pricing) state.adminData.pricing = { defaultOrder: DEFAULT_ORDER_PRICE, defaultFood: 0, defaultDrink: 0 };
+            if (typeof state.adminData.pricing.defaultFood !== 'number') state.adminData.pricing.defaultFood = 0;
+            if (typeof state.adminData.pricing.defaultDrink !== 'number') state.adminData.pricing.defaultDrink = 0;
 
             if (!state.activeCycleId || !state.cycles.find(c => c.id === state.activeCycleId)) {
                 state.activeCycleId = state.cycles.length > 0 ? state.cycles[0].id : null;
@@ -232,9 +249,11 @@ const DEFAULT_ORDER_PRICE = 35;
             const managingWeek = getManagingWeek();
             if (managingWeek) {
                 state.draftMenu = JSON.parse(JSON.stringify(managingWeek.menu || MENU_POR_DEFECTO));
+                state.draftMenuPrices = JSON.parse(JSON.stringify(managingWeek.menuPrices || {}));
                 state.draftInactiveDays = [...(managingWeek.inactiveDays || [])]; 
             } else {
                 state.draftMenu = JSON.parse(JSON.stringify(MENU_POR_DEFECTO));
+                state.draftMenuPrices = {};
                 state.draftInactiveDays = [];
             }
 
@@ -254,6 +273,76 @@ const DEFAULT_ORDER_PRICE = 35;
             return new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN', maximumFractionDigits: 0 }).format(amount);
         }
 
+        function getCatalogDefaultPrice(item) {
+            if (state.adminData.bebidas.includes(item)) return Number(state.adminData.pricing?.defaultDrink) || 0;
+            return Number(state.adminData.pricing?.defaultFood) || 0;
+        }
+
+        function getItemPricing(item, menuPrices = state.draftMenuPrices) {
+            const configured = state.adminData.itemPricing?.[item] || {};
+            const menuPrice = Number(menuPrices?.[item]);
+            const price = Number.isFinite(menuPrice) && menuPrice >= 0 ? menuPrice : (Number(configured.price) || getCatalogDefaultPrice(item));
+            const includedQuantity = Math.max(1, Number(configured.includedQuantity) || 1);
+            const additionalPrice = Number.isFinite(Number(configured.additionalPrice)) && Number(configured.additionalPrice) >= 0
+                ? Number(configured.additionalPrice)
+                : price / includedQuantity;
+            return { price, unit: configured.unit || 'pieza', includedQuantity, additionalPrice };
+        }
+
+        function getMenuItemPrice(item, menuPrices = state.draftMenuPrices) {
+            return getItemPricing(item, menuPrices).price;
+        }
+
+        function getItemQuantityTotal(item, quantity, menuPrices) {
+            const pricing = getItemPricing(item, menuPrices);
+            const fullPackages = Math.floor(quantity / pricing.includedQuantity);
+            const remainder = quantity % pricing.includedQuantity;
+            return (fullPackages * pricing.price) + (remainder * pricing.additionalPrice);
+        }
+
+        function getOrderTotal(order, week) {
+            if (typeof order?.price === 'number') return order.price;
+            const items = (order.items || []).length
+                ? order.items
+                : (order.breakfastType || '').split(' + ').map(item => ({ item: item.trim(), quantity: 1 })).filter(entry => entry.item);
+            return items.reduce((total, entry) => total + getItemQuantityTotal(entry.item, entry.quantity || 1, week?.menuPrices), 0);
+        }
+
+        function formatOrderNumber(number) {
+            return String(number || '').padStart(3, '0');
+        }
+
+        function getOrderNumber(order, fallbackIndex = 0) {
+            return formatOrderNumber(order?.orderNumber || fallbackIndex + 1);
+        }
+
+        function getNextOrderNumber(week) {
+            const highestNumber = (week?.orders || []).reduce((highest, order) => {
+                const number = Number(order.orderNumber);
+                return Number.isFinite(number) ? Math.max(highest, number) : highest;
+            }, 0);
+            return highestNumber + 1;
+        }
+
+        function updateSelectedOrderTotal(source) {
+            const totalContainer = document.getElementById('selected-order-total');
+            if (!totalContainer) return;
+            const targetWeek = source === 'Escuela' ? getManagingWeek() : getActiveWeek();
+            const selectedLines = ['foodSelection', 'drinkSelection'].map(groupName => {
+                const radio = document.querySelector(`input[name="${groupName}"]:checked`);
+                if (!radio) return null;
+                const quantityInput = radio.closest('label')?.querySelector('.order-item-quantity');
+                return { item: radio.value, quantity: Math.max(1, Number(quantityInput?.value) || 1) };
+            }).filter(Boolean);
+            const total = selectedLines.reduce((sum, line) => sum + getItemQuantityTotal(line.item, line.quantity, targetWeek?.menuPrices), 0);
+            if (!selectedLines.length) {
+                totalContainer.classList.add('hidden');
+                return;
+            }
+            totalContainer.innerHTML = `<span>Total a pagar</span><strong>${formatCurrency(total)}</strong>`;
+            totalContainer.classList.remove('hidden');
+        }
+
         function getReportOrders(cycle, week, period, day) {
             if (!cycle) return [];
             if (period === 'mensual') {
@@ -270,8 +359,10 @@ const DEFAULT_ORDER_PRICE = 35;
 
         function computeFoodStats(orders) {
             return orders.reduce((acc, o) => {
-                const items = o.breakfastType.split(' + ').map(i => i.trim()).filter(Boolean);
-                items.forEach(item => { acc[item] = (acc[item] || 0) + 1; });
+                const items = (o.items || []).length
+                    ? o.items
+                    : o.breakfastType.split(' + ').map(item => ({ item: item.trim(), quantity: 1 })).filter(entry => entry.item);
+                items.forEach(entry => { acc[entry.item] = (acc[entry.item] || 0) + (entry.quantity || 1); });
                 return acc;
             }, {});
         }
@@ -347,11 +438,12 @@ const DEFAULT_ORDER_PRICE = 35;
                     students: {},
                     alimentos: [],
                     bebidas: [],
+                    itemPricing: {},
                     passwords: { admin: 'admin', cocina: '', escuela: '' },
                     contactInfo: { name: '', phone: '' },
                     settings: { homeOrderSchedule: { mode: 'always', days: [1,2,3,4,5], start: '07:00', end: '16:00' } },
                     menuTemplates: [],
-                    pricing: { defaultOrder: DEFAULT_ORDER_PRICE }
+                    pricing: { defaultOrder: DEFAULT_ORDER_PRICE, defaultFood: 0, defaultDrink: 0 }
                 }
             };
             
@@ -535,6 +627,7 @@ const DEFAULT_ORDER_PRICE = 35;
                         <span>${item}</span>
                         <div class="flex gap-2">
                             <button type="button" onclick="window.app.editAdminItem('alimento', '${item.replace(/'/g, "\\'")}')" class="px-3 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 hover:bg-slate-100">Editar</button>
+                            <button type="button" onclick="window.app.configureAdminItem('alimento', '${item.replace(/'/g, "\\'")}')" class="px-3 py-2 rounded-xl bg-emerald-100 text-emerald-700 hover:bg-emerald-200">Presentación</button>
                             <button type="button" onclick="window.app.deleteAdminItem('alimento', '${item.replace(/'/g, "\\'")}')" class="px-3 py-2 rounded-xl bg-red-500 text-white hover:bg-red-600">Eliminar</button>
                         </div>
                     </div>
@@ -548,6 +641,7 @@ const DEFAULT_ORDER_PRICE = 35;
                         <span>${item}</span>
                         <div class="flex gap-2">
                             <button type="button" onclick="window.app.editAdminItem('bebida', '${item.replace(/'/g, "\\'")}')" class="px-3 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 hover:bg-slate-100">Editar</button>
+                            <button type="button" onclick="window.app.configureAdminItem('bebida', '${item.replace(/'/g, "\\'")}')" class="px-3 py-2 rounded-xl bg-emerald-100 text-emerald-700 hover:bg-emerald-200">Presentación</button>
                             <button type="button" onclick="window.app.deleteAdminItem('bebida', '${item.replace(/'/g, "\\'")}')" class="px-3 py-2 rounded-xl bg-red-500 text-white hover:bg-red-600">Eliminar</button>
                         </div>
                     </div>
@@ -563,7 +657,7 @@ const DEFAULT_ORDER_PRICE = 35;
 
             // Estado de conexión discreto para Firebase
             const dbStatusHtml = state.dbConnected 
-                ? '<span class="text-emerald-500 inline-flex flex-col items-center gap-0.5"><span class="inline-flex items-center gap-1"><i data-lucide="cloud-check" class="w-3 h-3"></i> Conectado a Firebase</span><span class="text-xs opacity-60">v5.5</span></span>'
+                ? '<span class="text-emerald-500 inline-flex flex-col items-center gap-0.5"><span class="inline-flex items-center gap-1"><i data-lucide="cloud-check" class="w-3 h-3"></i> Conectado a Firebase</span><span class="text-xs opacity-60">v5.7</span></span>'
                 : '<span class="text-amber-500 inline-flex items-center gap-1"><i data-lucide="cloud-off" class="w-3 h-3 animate-pulse"></i> Conectando...</span>';
 
             return `
@@ -644,8 +738,12 @@ const DEFAULT_ORDER_PRICE = 35;
 
             const filteredByDay = activeWeek.orders.filter(o => o.dayFor === state.kitchenDay);
             const filteredByGrade = state.kitchenGradeFilter === 'Todos' ? filteredByDay : filteredByDay.filter(o => o.grade === state.kitchenGradeFilter);
-            const pendOrders = filteredByGrade.filter(o => o.status === 'pendiente');
-            const entOrders = filteredByGrade.filter(o => o.status === 'entregado');
+            const orderSearch = (state.kitchenOrderSearch || '').trim().toLowerCase();
+            const filteredBySearch = orderSearch
+                ? filteredByGrade.filter((order, index) => getOrderNumber(order, index).includes(orderSearch) || order.studentName.toLowerCase().includes(orderSearch))
+                : filteredByGrade;
+            const pendOrders = filteredBySearch.filter(o => o.status === 'pendiente');
+            const entOrders = filteredBySearch.filter(o => o.status === 'entregado');
             const displayedOrders = state.kitchenTab === 'pendientes' ? pendOrders : entOrders;
 
             let daysHtml = '';
@@ -707,8 +805,9 @@ const DEFAULT_ORDER_PRICE = 35;
                 `;
             } else {
                 content = `<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 w-full">`;
-                displayedOrders.forEach(order => {
+                displayedOrders.forEach((order, orderIndex) => {
                     const time = new Date(order.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                    const orderNumber = getOrderNumber(order, orderIndex);
                     
                     let actionBtnHtml = '';
                     if (state.kitchenTab === 'pendientes') {
@@ -736,6 +835,7 @@ const DEFAULT_ORDER_PRICE = 35;
                         <div class="bg-white p-5 rounded-2xl shadow-sm border ${state.kitchenTab === 'entregados' ? (state.kitchenSelectedDelivered.includes(order.id) ? 'border-amber-400 bg-amber-50/50' : 'border-emerald-100 bg-emerald-50/30') : 'border-slate-100'} flex flex-col transition-colors">
                             <div class="flex justify-between items-start mb-4 gap-2">
                                 <div class="flex items-start gap-2 flex-wrap">
+                                    <span class="bg-slate-900 text-white text-xs font-bold px-2 py-1 rounded-md">Pedido #${orderNumber}</span>
                                     ${checkboxHtml}
                                     <span class="bg-blue-50 text-blue-700 text-xs font-bold px-2 py-1 rounded-md uppercase tracking-wide">${order.source}</span>
                                     ${window.app.getPaymentBadge(order.paymentStatus)}
@@ -764,6 +864,10 @@ const DEFAULT_ORDER_PRICE = 35;
                             </div>
                         </div>
                         <div class="flex flex-col gap-4 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+                            <div class="relative">
+                                <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2"></i>
+                                <input id="kitchen-order-search" type="search" value="${state.kitchenOrderSearch || ''}" oninput="window.app.setKitchenOrderSearch(this.value)" placeholder="Buscar por número o alumno..." class="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-4 py-2.5 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100">
+                            </div>
                             <div class="flex flex-wrap gap-2 items-center"><span class="text-sm font-semibold text-slate-400 mx-2 hidden sm:block">Día:</span>${daysHtml}</div>
                             <div class="flex flex-wrap gap-2 items-center border-t border-slate-100 pt-3"><span class="text-sm font-semibold text-slate-400 mx-2 hidden sm:block">Grupo:</span>${gradesFilterHtml}</div>
                         </div>
@@ -1028,10 +1132,12 @@ const DEFAULT_ORDER_PRICE = 35;
                 if (items.length === 0) return `<div class="bg-slate-50 text-slate-500 p-4 rounded-xl text-sm border border-slate-100 col-span-full">${emptyMsg}</div>`;
                 let html = '';
                 items.forEach(item => {
+                    const pricing = getItemPricing(item, weekData.menuPrices);
                     html += `
-                        <label class="food-label flex items-center p-4 border rounded-xl cursor-pointer transition-all border-slate-200 hover:border-blue-300 hover:bg-slate-50">
+                        <label class="food-label grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 p-4 border rounded-xl cursor-pointer transition-all border-slate-200 hover:border-blue-300 hover:bg-slate-50">
                             <input type="radio" name="${groupName}" value="${item}" class="w-5 h-5 text-blue-600 border-slate-300 focus:ring-blue-500 cursor-pointer" onchange="window.app.selectFood(this)">
-                            <span class="ml-3 font-medium text-slate-700">${item}</span>
+                            <span class="font-medium text-slate-700 min-w-0 break-words">${item}<small class="block text-xs font-normal text-slate-500 leading-snug">${pricing.includedQuantity > 1 ? `Incluye ${pricing.includedQuantity} ${pricing.unit}` : `Por ${pricing.unit}`} · ${formatCurrency(pricing.price)}</small></span>
+                            <span class="flex flex-col items-center gap-1 text-xs text-slate-500 whitespace-nowrap">Cantidad (${pricing.unit}) <input type="number" min="1" step="1" value="1" class="order-item-quantity w-16 bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-center text-sm text-slate-700 outline-none focus:border-blue-500" oninput="window.app.updateSelectedOrderTotal('${source}')" onclick="event.stopPropagation()"></span>
                         </label>
                     `;
                 });
@@ -1088,7 +1194,14 @@ const DEFAULT_ORDER_PRICE = 35;
                         ${menusHtml}
                     </div>
 
+                    ${source === 'Escuela' ? `
+                        <div class="relative">
+                            <i data-lucide="search" class="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2"></i>
+                            <input type="search" value="${state.schoolOrderSearch || ''}" oninput="window.app.setSchoolOrderSearch(this.value)" placeholder="Buscar pedido por número o alumno..." class="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-4 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100">
+                        </div>
+                    ` : ''}
                     <div id="order-summary" class="hidden mb-6"></div>
+                    <div id="selected-order-total" class="hidden mb-6 px-4 py-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 font-bold flex items-center justify-between"></div>
 
                     <button type="submit" id="btn-submit" disabled class="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white py-4 rounded-xl font-bold text-lg transition-colors flex items-center justify-center gap-2 shadow-sm">
                         <i data-lucide="check-circle-2" class="w-6 h-6"></i> Confirmar Pedido
@@ -1162,13 +1275,22 @@ const DEFAULT_ORDER_PRICE = 35;
                     const btnClass = isSelected ? 'border-emerald-500 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-white hover:border-slate-300 text-slate-600';
                     const circleClass = isSelected ? 'bg-emerald-500 text-white' : 'bg-slate-200';
                     const checkHtml = isSelected ? `<i data-lucide="check" class="w-3 h-3" stroke-width="4"></i>` : '';
+                    const price = getMenuItemPrice(item);
                     return `
-                        <button onclick="window.app.toggleFood('${item}')" class="flex items-center text-left w-full p-3 rounded-xl border transition-all text-sm ${btnClass}">
-                            <div class="w-5 h-5 rounded-full mr-3 flex items-center justify-center flex-shrink-0 ${circleClass}">
-                                ${checkHtml}
+                        <div class="flex flex-col gap-3 w-full min-w-0 p-3 rounded-xl border transition-all text-sm ${btnClass}">
+                            <button type="button" onclick="window.app.toggleFood('${item.replace(/'/g, "\\'")}')" class="flex items-start text-left w-full min-w-0 p-1">
+                                <div class="w-5 h-5 rounded-full mr-3 mt-0.5 flex items-center justify-center flex-shrink-0 ${circleClass}">
+                                    ${checkHtml}
+                                </div>
+                                <span class="font-medium leading-snug break-words min-w-0">${item}</span>
+                            </button>
+                            <div class="flex items-center justify-end gap-2 flex-wrap border-t border-slate-200/70 pt-2">
+                                <label class="flex items-center gap-1 text-xs text-slate-500 whitespace-nowrap">
+                                    $<input type="number" min="0" step="0.01" value="${price}" onchange="window.app.setMenuItemPrice('${item.replace(/'/g, "\\'")}', this.value)" class="w-20 bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-right text-sm text-slate-700 outline-none focus:border-emerald-500">
+                                </label>
+                                <button type="button" onclick="window.app.configureAdminItem('${state.adminData.bebidas.includes(item) ? 'bebida' : 'alimento'}', '${item.replace(/'/g, "\\'")}')" class="px-2.5 py-1.5 rounded-lg bg-emerald-100 text-emerald-700 hover:bg-emerald-200 text-xs font-semibold whitespace-nowrap transition-colors">Presentación</button>
                             </div>
-                            <span class="font-medium leading-tight">${item}</span>
-                        </button>
+                        </div>
                     `;
                 }).join('');
             };
@@ -1305,7 +1427,7 @@ const DEFAULT_ORDER_PRICE = 35;
                         <h3 class="font-bold text-2xl text-slate-900 flex items-center gap-2">
                             <i data-lucide="database" class="w-6 h-6 text-slate-600"></i> Administración del Sistema
                         </h3>
-                        <p class="text-slate-500 text-sm mt-1">Gestiona ciclos, catálogos, reportes y accesos. <span class="text-slate-300 text-xs">v5.5</span></p>
+                            <p class="text-slate-500 text-sm mt-1">Gestiona ciclos, catálogos, reportes y accesos. <span class="text-slate-300 text-xs">v5.7</span></p>
                     </div>
 
                     ${tabButtons}
@@ -1329,8 +1451,70 @@ const DEFAULT_ORDER_PRICE = 35;
             if (state.activeModal === 'edit-week') return renderEditWeekModal();
             if (state.activeModal === 'add-students-bulk') return renderAddStudentsModal();
             if (state.activeModal === 'add-student-single') return renderAddSingleStudentModal();
+            if (state.activeModal === 'edit-catalog-item') return renderEditCatalogItemModal();
+            if (state.activeModal === 'configure-catalog-item') return renderConfigureCatalogItemModal();
             
             return '';
+        }
+
+        function renderCatalogModalShell(title, subtitle, content, submitHandler, submitLabel, icon = 'package') {
+            return `
+                <div class="fixed inset-0 bg-slate-950/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 fade-in">
+                    <div class="bg-white rounded-3xl p-6 sm:p-8 w-full max-w-md shadow-2xl border border-slate-200">
+                        <div class="flex items-start justify-between gap-4 mb-6">
+                            <div class="flex items-start gap-3">
+                                <div class="w-11 h-11 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center flex-shrink-0">
+                                    <i data-lucide="${icon}" class="w-5 h-5"></i>
+                                </div>
+                                <div>
+                                    <h3 class="text-xl font-bold text-slate-900">${title}</h3>
+                                    <p class="text-sm text-slate-500 mt-1">${subtitle}</p>
+                                </div>
+                            </div>
+                            <button type="button" onclick="window.app.closeModal()" class="p-2 rounded-xl text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition-colors" aria-label="Cerrar">
+                                <i data-lucide="x" class="w-5 h-5"></i>
+                            </button>
+                        </div>
+                        <form onsubmit="${submitHandler}(event)" class="space-y-5">
+                            ${content}
+                            <div class="pt-4 border-t border-slate-100 flex gap-3">
+                                <button type="button" onclick="window.app.closeModal()" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 py-3 rounded-xl font-semibold transition-colors">Cancelar</button>
+                                <button type="submit" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-3 rounded-xl font-semibold transition-colors">${submitLabel}</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderEditCatalogItemModal() {
+            const item = state.modalData.item || '';
+            return renderCatalogModalShell(
+                'Editar producto',
+                'Actualiza el nombre que verán las familias y la escuela.',
+                `<div><label class="block text-sm font-semibold text-slate-700 mb-2">Nombre del producto</label><input type="text" id="catalog-item-name" value="${item}" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 text-slate-700" required autofocus></div>`,
+                'window.app.saveCatalogItemName',
+                'Guardar nombre',
+                'pencil'
+            );
+        }
+
+        function renderConfigureCatalogItemModal() {
+            const item = state.modalData.item || '';
+            const current = state.adminData.itemPricing[item] || {};
+            const defaultAdditional = current.additionalPrice ?? (getCatalogDefaultPrice(item) / (Number(current.includedQuantity) || 1));
+            return renderCatalogModalShell(
+                'Configurar presentación',
+                `Define cómo se vende “${item}” y cuánto incluye su precio base.`,
+                `<div class="space-y-4">
+                    <div><label class="block text-sm font-semibold text-slate-700 mb-2">Unidad de venta</label><input type="text" id="catalog-item-unit" value="${current.unit || 'pieza'}" placeholder="Ej. pieza, taco u orden" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 text-slate-700" required></div>
+                    <div><label class="block text-sm font-semibold text-slate-700 mb-2">Cantidad incluida en el precio base</label><input type="number" min="1" step="1" id="catalog-item-included" value="${current.includedQuantity || 1}" class="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 text-slate-700" required><p class="text-xs text-slate-500 mt-1">Ejemplo: 2 tacos por el precio base.</p></div>
+                    <div><label class="block text-sm font-semibold text-slate-700 mb-2">Precio de cada pieza adicional</label><div class="relative"><span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">$</span><input type="number" min="0" step="0.01" id="catalog-item-additional" value="${defaultAdditional.toFixed(2)}" class="w-full bg-slate-50 border border-slate-200 rounded-xl pl-8 pr-4 py-3 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 text-slate-700" required></div><p class="text-xs text-slate-500 mt-1">Se usará cuando se solicite una cantidad que exceda el paquete.</p></div>
+                </div>`,
+                'window.app.saveCatalogItemPresentation',
+                'Guardar presentación',
+                'layers-3'
+            );
         }
 
         function renderCreateCycleModal() {
@@ -1443,7 +1627,7 @@ const DEFAULT_ORDER_PRICE = 35;
 
             return `
                 <div class="space-y-6">
-                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                    <div class="grid grid-cols-1 lg:grid-cols-4 gap-8">
                         <div class="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
                             <h5 class="text-xs font-bold text-slate-500 mb-3 uppercase tracking-wider border-b border-slate-100 pb-2">Contacto de Ventas (Padres)</h5>
                             <form onsubmit="window.app.saveContactInfo(event)" class="space-y-4">
@@ -1466,6 +1650,16 @@ const DEFAULT_ORDER_PRICE = 35;
 
                         <div class="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
                             ${scheduleHtml}
+                        </div>
+
+                        <div class="bg-white p-5 rounded-2xl border border-slate-100 shadow-sm">
+                            <h5 class="text-xs font-bold text-slate-500 mb-3 uppercase tracking-wider border-b border-slate-100 pb-2">Precios Generales</h5>
+                            <p class="text-[11px] text-slate-400 mb-3 leading-tight">Estos precios aplican automáticamente a todos los artículos, salvo que Gestión Escolar defina otro precio en el menú.</p>
+                            <form onsubmit="window.app.saveCatalogPricing(event)" class="space-y-4">
+                                <div><label class="block text-sm font-semibold text-slate-700 mb-1">Precio de alimentos</label><input type="number" min="0" step="0.01" id="default-food-price" value="${state.adminData.pricing.defaultFood || 0}" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 outline-none focus:border-blue-500"></div>
+                                <div><label class="block text-sm font-semibold text-slate-700 mb-1">Precio de bebidas</label><input type="number" min="0" step="0.01" id="default-drink-price" value="${state.adminData.pricing.defaultDrink || 0}" class="w-full bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 outline-none focus:border-blue-500"></div>
+                                <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-lg text-sm font-semibold transition-colors">Guardar Precios</button>
+                            </form>
                         </div>
                     </div>
             `;
@@ -1673,6 +1867,7 @@ const DEFAULT_ORDER_PRICE = 35;
                                         <span>${item}</span>
                                         <div class="flex gap-2">
                                             <button type="button" onclick="window.app.editAdminItem('alimento', '${item.replace(/'/g, "\\'")}')" class="px-3 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 hover:bg-slate-100">Editar</button>
+                                            <button type="button" onclick="window.app.configureAdminItem('alimento', '${item.replace(/'/g, "\\'")}')" class="px-3 py-2 rounded-xl bg-emerald-100 text-emerald-700 hover:bg-emerald-200">Presentación</button>
                                             <button type="button" onclick="window.app.deleteAdminItem('alimento', '${item.replace(/'/g, "\\'")}')" class="px-3 py-2 rounded-xl bg-red-500 text-white hover:bg-red-600">Eliminar</button>
                                         </div>
                                     </div>
@@ -1698,6 +1893,7 @@ const DEFAULT_ORDER_PRICE = 35;
                                         <span>${item}</span>
                                         <div class="flex gap-2">
                                             <button type="button" onclick="window.app.editAdminItem('bebida', '${item.replace(/'/g, "\\'")}')" class="px-3 py-2 rounded-xl bg-white border border-slate-200 text-slate-700 hover:bg-slate-100">Editar</button>
+                                            <button type="button" onclick="window.app.configureAdminItem('bebida', '${item.replace(/'/g, "\\'")}')" class="px-3 py-2 rounded-xl bg-emerald-100 text-emerald-700 hover:bg-emerald-200">Presentación</button>
                                             <button type="button" onclick="window.app.deleteAdminItem('bebida', '${item.replace(/'/g, "\\'")}')" class="px-3 py-2 rounded-xl bg-red-500 text-white hover:bg-red-600">Eliminar</button>
                                         </div>
                                     </div>
@@ -1714,9 +1910,9 @@ const DEFAULT_ORDER_PRICE = 35;
             const reportWeek = reportCycle ? reportCycle.weeks.find(w => w.id === state.reportWeekId) : null;
             const reportOrders = getReportOrders(reportCycle, reportWeek, state.reportPeriod, state.reportDay);
             const totalOrders = reportOrders.length;
-            const totalRevenue = totalOrders * (state.adminData.pricing?.defaultOrder || DEFAULT_ORDER_PRICE);
+            const totalRevenue = reportOrders.reduce((total, order) => total + getOrderTotal(order, reportWeek), 0);
             const debtOrders = reportOrders.filter(o => o.paymentStatus === 'Fiado');
-            const debtAmount = debtOrders.length * (state.adminData.pricing?.defaultOrder || DEFAULT_ORDER_PRICE);
+            const debtAmount = debtOrders.reduce((total, order) => total + getOrderTotal(order, reportWeek), 0);
             const uniqueStudents = new Set(reportOrders.map(o => o.studentName)).size;
             const paymentsCount = reportOrders.reduce((acc, o) => {
                 acc[o.paymentStatus] = (acc[o.paymentStatus] || 0) + 1;
@@ -1728,7 +1924,7 @@ const DEFAULT_ORDER_PRICE = 35;
             const leastPopular = orderedFoods.slice(-3).reverse();
             const debtSummary = Object.values(debtOrders.reduce((acc, o) => {
                 if (!acc[o.studentName]) acc[o.studentName] = { studentName: o.studentName, amount: 0, firstDate: o.createdAt };
-                acc[o.studentName].amount += (state.adminData.pricing?.defaultOrder || DEFAULT_ORDER_PRICE);
+                acc[o.studentName].amount += getOrderTotal(o, reportWeek);
                 if (o.createdAt < acc[o.studentName].firstDate) acc[o.studentName].firstDate = o.createdAt;
                 return acc;
             }, {}));
@@ -2044,12 +2240,13 @@ const DEFAULT_ORDER_PRICE = 35;
                 const weekNum = cycle.weeks.length + 1;
                 const range = `S${weekNum}. DEL ${fmt(startVal)} AL ${fmt(endVal)}`;
                 const isFirstWeek = cycle.weeks.length === 0;
-                const newWeek = { id: 'week_' + Date.now(), range: range, menu: JSON.parse(JSON.stringify(MENU_POR_DEFECTO)), orders: [], inactiveDays: [], status: isFirstWeek ? 'active' : 'planned' };
+                const newWeek = { id: 'week_' + Date.now(), range: range, menu: JSON.parse(JSON.stringify(MENU_POR_DEFECTO)), menuPrices: {}, orders: [], inactiveDays: [], status: isFirstWeek ? 'active' : 'planned' };
                 cycle.weeks.push(newWeek);
                 if (!cycle.activeWeekId) cycle.activeWeekId = newWeek.id;
                 saveFullLocalData(fullData); loadLocalData();
                 state.managingWeekId = newWeek.id;
                 state.draftMenu = JSON.parse(JSON.stringify(newWeek.menu));
+                state.draftMenuPrices = {};
                 state.draftInactiveDays = [];
                 state.activeModal = null;
                 renderView();
@@ -2286,6 +2483,18 @@ const DEFAULT_ORDER_PRICE = 35;
             setKitchenDay: (day) => { state.kitchenDay = day; state.kitchenSelectedDelivered = []; renderView(); },
             setKitchenTab: (tab) => { state.kitchenTab = tab; state.kitchenSelectedDelivered = []; renderView(); },
             setKitchenGradeFilter: (grade) => { state.kitchenGradeFilter = grade; state.kitchenSelectedDelivered = []; renderView(); },
+            setKitchenOrderSearch: (value) => {
+                state.kitchenOrderSearch = value;
+                renderView();
+                setTimeout(() => {
+                    const input = document.getElementById('kitchen-order-search');
+                    if (input) {
+                        input.focus();
+                        input.selectionStart = input.selectionEnd = input.value.length;
+                    }
+                }, 0);
+            },
+            setSchoolOrderSearch: (value) => { state.schoolOrderSearch = value; updateOrderFormUI('Escuela'); },
             setMenuDay: (day) => { state.menuConfigDay = day; renderView(); },
             
             setReportCycle: (cycleId) => { 
@@ -2310,7 +2519,8 @@ const DEFAULT_ORDER_PRICE = 35;
                 const newTemplate = {
                     id: 'tmpl_' + Date.now(),
                     name: templateName,
-                    menu: JSON.parse(JSON.stringify(state.draftMenu))
+                    menu: JSON.parse(JSON.stringify(state.draftMenu)),
+                    menuPrices: JSON.parse(JSON.stringify(state.draftMenuPrices))
                 };
 
                 if (exists) {
@@ -2328,6 +2538,7 @@ const DEFAULT_ORDER_PRICE = 35;
                 const template = state.adminData.menuTemplates.find(t => t.id === templateId);
                 if (!template) return;
                 state.draftMenu = JSON.parse(JSON.stringify(template.menu));
+                state.draftMenuPrices = JSON.parse(JSON.stringify(template.menuPrices || {}));
                 renderView();
                 window.app.showToast(`Plantilla ${template.name} aplicada`, 'success');
             },
@@ -2356,6 +2567,7 @@ const DEFAULT_ORDER_PRICE = 35;
                 state.managingWeekId = targetCycle.activeWeekId || (targetCycle.weeks.length > 0 ? targetCycle.weeks[0].id : null);
                 const targetWeek = getManagingWeek();
                 state.draftMenu = targetWeek ? JSON.parse(JSON.stringify(targetWeek.menu || MENU_POR_DEFECTO)) : JSON.parse(JSON.stringify(MENU_POR_DEFECTO));
+                state.draftMenuPrices = targetWeek ? JSON.parse(JSON.stringify(targetWeek.menuPrices || {})) : {};
                 state.draftInactiveDays = targetWeek ? [...(targetWeek.inactiveDays || [])] : [];
                 state.formSelection.grade = ''; 
                 renderView();
@@ -2393,6 +2605,7 @@ const DEFAULT_ORDER_PRICE = 35;
                 state.managingWeekId = weekId;
                 const targetWeek = getManagingWeek();
                 state.draftMenu = JSON.parse(JSON.stringify(targetWeek.menu || MENU_POR_DEFECTO));
+                state.draftMenuPrices = JSON.parse(JSON.stringify(targetWeek.menuPrices || {}));
                 state.draftInactiveDays = [...(targetWeek.inactiveDays || [])];
                 state.formSelection.grade = ''; 
                 renderView();
@@ -2461,12 +2674,19 @@ const DEFAULT_ORDER_PRICE = 35;
                 renderView();
             },
 
+            setMenuItemPrice: (item, value) => {
+                const price = Number(value);
+                if (!Number.isFinite(price) || price < 0) return;
+                state.draftMenuPrices[item] = price;
+            },
+
             saveMenu: () => {
                 const fullData = getFullLocalData();
                 const cycle = fullData.cycles.find(c => c.id === state.managingCycleId);
                 const targetWeek = cycle?.weeks.find(w => w.id === state.managingWeekId);
                 if (targetWeek) {
                     targetWeek.menu = state.draftMenu; 
+                    targetWeek.menuPrices = state.draftMenuPrices;
                     targetWeek.inactiveDays = state.draftInactiveDays;
                     saveFullLocalData(fullData);
                     window.app.showToast("✓ Menú de la semana actualizado exitosamente!", "success");
@@ -2494,6 +2714,10 @@ const DEFAULT_ORDER_PRICE = 35;
                 
                 const allOrders = targetWeek.orders || [];
                 const gradeOrders = allOrders.filter(o => o.dayFor === day && o.grade === grade);
+                const orderSearch = source === 'Escuela' ? (state.schoolOrderSearch || '').trim().toLowerCase() : '';
+                const visibleGradeOrders = orderSearch
+                    ? gradeOrders.filter(order => getOrderNumber(order, allOrders.indexOf(order)).includes(orderSearch) || order.studentName.toLowerCase().includes(orderSearch))
+                    : gradeOrders;
                 const summaryContainer = document.getElementById('order-summary');
                 const submitBtn = document.getElementById('btn-submit');
                 
@@ -2509,9 +2733,11 @@ const DEFAULT_ORDER_PRICE = 35;
                                     <div class="space-y-2">
                             `;
                             studentOrders.forEach(o => {
+                                const orderNumber = getOrderNumber(o, allOrders.indexOf(o));
                                 summaryHtml += `
                                         <div class="flex justify-between items-center text-amber-900 bg-white/70 p-2.5 rounded-lg border border-amber-100 shadow-sm transition-all">
-                                            <div class="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 flex-wrap">
+                                            <div class="flex flex-col items-start gap-1">
+                                                <span class="bg-slate-900 text-white px-2 py-0.5 rounded text-xs font-bold">Pedido #${orderNumber}</span>
                                                 <span class="font-semibold">${o.studentName}</span> 
                                                 <span class="text-amber-700 bg-amber-100/50 px-2 py-0.5 rounded text-xs font-medium w-fit">${o.breakfastType}</span>
                                                 ${window.app.getPaymentBadge(o.paymentStatus)}
@@ -2566,13 +2792,15 @@ const DEFAULT_ORDER_PRICE = 35;
                                 <div class="max-h-56 overflow-y-auto custom-scrollbar mb-3 pr-2 space-y-2">
                         `;
                         
-                        if (gradeOrders.length === 0) {
+                        if (visibleGradeOrders.length === 0) {
                             summaryHtml += `<p class="text-blue-600/70 italic text-center py-2">No hay pedidos registrados aún para este grupo.</p>`;
                         } else {
-                            gradeOrders.forEach(o => {
+                            visibleGradeOrders.forEach(o => {
+                                const orderNumber = getOrderNumber(o, allOrders.indexOf(o));
                                 summaryHtml += `
                                     <div class="flex justify-between items-center text-blue-900 bg-white/70 p-2.5 rounded-lg border border-blue-100 shadow-sm transition-all hover:border-blue-300">
-                                        <div class="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2 flex-wrap">
+                                        <div class="flex flex-col items-start gap-1">
+                                            <span class="bg-slate-900 text-white px-2 py-0.5 rounded text-xs font-bold">Pedido #${orderNumber}</span>
                                             <span class="font-semibold">${o.studentName}</span> 
                                             <span class="text-blue-700 bg-blue-100/50 px-2 py-0.5 rounded text-xs font-medium w-fit">${o.breakfastType}</span>
                                             ${window.app.getPaymentBadge(o.paymentStatus)}
@@ -2697,6 +2925,7 @@ const DEFAULT_ORDER_PRICE = 35;
                 radioBtn.parentElement.classList.remove('border-slate-200');
                 radioBtn.parentElement.classList.add('border-blue-500', 'bg-blue-50');
                 document.getElementById('btn-submit').disabled = false;
+                updateSelectedOrderTotal(state.loggedStudent ? 'Casa' : 'Escuela');
             },
 
             submitOrder: (e, source) => {
@@ -2738,12 +2967,20 @@ const DEFAULT_ORDER_PRICE = 35;
                     return;
                 }
 
-                const breakfastType = [foodRadio?.value, drinkRadio?.value].filter(Boolean).join(' + ');
+                const selectedLines = [foodRadio, drinkRadio].filter(Boolean).map(radio => {
+                    const quantityInput = radio.closest('label')?.querySelector('.order-item-quantity');
+                    return { item: radio.value, quantity: Math.max(1, Number(quantityInput?.value) || 1) };
+                });
+                const breakfastType = selectedLines.map(line => `${line.item}${line.quantity > 1 ? ` x${line.quantity}` : ''}`).join(' + ');
+                const orderPrice = selectedLines.reduce((total, line) => total + getItemQuantityTotal(line.item, line.quantity, targetWeek?.menuPrices), 0);
                 const now = new Date();
                 const orderData = {
                     id: 'ord_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+                    orderNumber: getNextOrderNumber(targetWeek),
                     source, dayFor, grade, studentName,
+                    items: selectedLines,
                     breakfastType: breakfastType, paymentStatus: paymentStatus, 
+                    price: orderPrice,
                     status: 'pendiente', 
                     timestamp: Date.now(),
                     createdAt: now.toISOString(),
@@ -3248,6 +3485,33 @@ const DEFAULT_ORDER_PRICE = 35;
                 renderView();
             },
 
+            configureAdminItem: (type, item) => {
+                state.modalData = { type, item };
+                state.activeModal = 'configure-catalog-item';
+                renderView();
+            },
+
+            saveCatalogItemPresentation: (e) => {
+                e.preventDefault();
+                const item = state.modalData.item;
+                const unit = document.getElementById('catalog-item-unit').value.trim();
+                const includedQuantity = Number(document.getElementById('catalog-item-included').value);
+                const additionalPrice = Number(document.getElementById('catalog-item-additional').value);
+                if (!item || !unit || !Number.isInteger(includedQuantity) || includedQuantity < 1 || !Number.isFinite(additionalPrice) || additionalPrice < 0) {
+                    window.app.showToast('Revisa los datos de la presentación.', 'error');
+                    return;
+                }
+                state.adminData.itemPricing[item] = { unit, includedQuantity, additionalPrice };
+                const fullData = getFullLocalData();
+                fullData.adminData = state.adminData;
+                saveFullLocalData(fullData);
+                state.activeModal = null;
+                state.modalData = {};
+                loadLocalData();
+                renderView();
+                window.app.showToast(`Presentación de ${item} actualizada`, 'success');
+            },
+
             deleteSelectedCatalog: (catalogType) => {
                 const targetSelected = catalogType === 'alimentos' ? state.adminSelectedAlimentos : state.adminSelectedBebidas;
                 if (!confirm(`¿Estás seguro de eliminar ${targetSelected.length} artículo(s) de todos los menús?`)) return;
@@ -3275,9 +3539,20 @@ const DEFAULT_ORDER_PRICE = 35;
                     return;
                 }
 
-                // Para alimentos y bebidas, mantener el prompt
-                const newVal = prompt("Editar valor:", oldVal);
-                if (newVal === null || newVal.trim() === '' || newVal.trim() === oldVal) return; 
+                state.modalData = { type, item: oldVal };
+                state.activeModal = 'edit-catalog-item';
+                renderView();
+            },
+
+            saveCatalogItemName: (e) => {
+                e.preventDefault();
+                const type = state.modalData.type;
+                const oldVal = state.modalData.item;
+                const newVal = document.getElementById('catalog-item-name').value.trim();
+                if (!newVal || newVal === oldVal) {
+                    window.app.closeModal();
+                    return;
+                }
                 
                 const cleanVal = newVal.trim();
                 const fullData = getFullLocalData();
@@ -3288,6 +3563,10 @@ const DEFAULT_ORDER_PRICE = 35;
                     const idx = targetArray.indexOf(oldVal);
                     if (idx > -1) {
                         targetArray[idx] = cleanVal;
+                        if (state.adminData.itemPricing[oldVal]) {
+                            state.adminData.itemPricing[cleanVal] = state.adminData.itemPricing[oldVal];
+                            delete state.adminData.itemPricing[oldVal];
+                        }
                         fullData.cycles.forEach(c => { c.weeks.forEach(w => { DIAS_SEMANA.forEach(d => { if (w.menu[d]) { const mIdx = w.menu[d].indexOf(oldVal); if (mIdx > -1) w.menu[d][mIdx] = cleanVal; } }); }); });
                         if (type === 'alimento') { const cIdx = state.adminSelectedAlimentos.indexOf(oldVal); if (cIdx > -1) state.adminSelectedAlimentos[cIdx] = cleanVal; } 
                         else { const cIdx = state.adminSelectedBebidas.indexOf(oldVal); if (cIdx > -1) state.adminSelectedBebidas[cIdx] = cleanVal; }
@@ -3298,7 +3577,10 @@ const DEFAULT_ORDER_PRICE = 35;
                 let toastMessage = null;
                 if (needsSave) { 
                     fullData.adminData = state.adminData; 
-                    saveFullLocalData(fullData); loadLocalData(); renderView(); 
+                    saveFullLocalData(fullData);
+                    state.activeModal = null;
+                    state.modalData = {};
+                    loadLocalData();
                     if (typeof parsedCount !== 'undefined' && parsedCount > 0) {
                         toastMessage = parsedCount === 1 ? '1 alumno añadido' : parsedCount + ' alumnos añadidos';
                     } else if (type === 'alimento') {
@@ -3335,6 +3617,7 @@ const DEFAULT_ORDER_PRICE = 35;
                         state.adminData.bebidas = state.adminData.bebidas.filter(c => c !== itemVal);
                         state.adminSelectedBebidas = state.adminSelectedBebidas.filter(c => c !== itemVal);
                     }
+                    delete state.adminData.itemPricing[itemVal];
                     fullData.cycles.forEach(c => { c.weeks.forEach(w => { DIAS_SEMANA.forEach(d => { if (w.menu[d]) w.menu[d] = w.menu[d].filter(f => f !== itemVal); }); }); });
                     needsSave = true;
                 }
@@ -3357,6 +3640,23 @@ const DEFAULT_ORDER_PRICE = 35;
                 state.adminData.passwords = { admin: document.getElementById('pwd-admin').value.trim(), cocina: document.getElementById('pwd-cocina').value.trim(), escuela: document.getElementById('pwd-escuela').value.trim() };
                 const fullData = getFullLocalData(); fullData.adminData = state.adminData; saveFullLocalData(fullData);
                 alert("¡Contraseñas actualizadas correctamente!");
+            },
+
+            saveCatalogPricing: (e) => {
+                e.preventDefault();
+                const defaultFood = Number(document.getElementById('default-food-price').value);
+                const defaultDrink = Number(document.getElementById('default-drink-price').value);
+                if (!Number.isFinite(defaultFood) || defaultFood < 0 || !Number.isFinite(defaultDrink) || defaultDrink < 0) {
+                    window.app.showToast('Los precios deben ser números mayores o iguales a cero.', 'error');
+                    return;
+                }
+                state.adminData.pricing.defaultFood = defaultFood;
+                state.adminData.pricing.defaultDrink = defaultDrink;
+                const fullData = getFullLocalData();
+                fullData.adminData = state.adminData;
+                saveFullLocalData(fullData);
+                loadLocalData();
+                window.app.showToast('Precios generales actualizados correctamente', 'success');
             },
 
             resetFirebaseData: async () => {
